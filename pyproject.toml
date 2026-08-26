@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gridgen"
+version = "0.1.0"
+description = "A pluggable framework for generating and evaluating synthetic distribution networks"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = ["numpy>=1.23"]
+
+[project.optional-dependencies]
+# Plugins bring their own modelling stack; the core deliberately does not.
+torch = ["torch>=2.0"]
+dev = ["pytest>=7.0"]
+
+[tool.setuptools.packages.find]
+include = ["gridgen*", "adapters*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

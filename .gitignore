@@ -1,0 +1,26 @@
+# python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.venv/
+venv/
+
+# trained weights and run outputs
+checkpoints/
+outputs/
+*.pt
+*.pth
+
+# data is referenced by path, never committed
+# (anchored to the repo root so the gridgen/data package is not excluded)
+/data/
+/tensors/
+
+# editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
