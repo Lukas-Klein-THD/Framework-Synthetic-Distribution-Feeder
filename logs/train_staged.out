@@ -1,0 +1,22 @@
+TensorFeederSource(n=2583, M=128)
+[topology   500] d=-0.1958 g=+0.1038 tau=0.681
+[topology  1000] d=+0.0113 g=+0.2017 tau=0.464
+[topology  1500] d=-0.2857 g=+0.2442 tau=0.316
+[topology  2000] d=-0.3768 g=-0.1655 tau=0.215
+[topology  2500] d=-1.0066 g=-0.2977 tau=0.147
+[topology  3000] d=-0.6490 g=-0.4731 tau=0.100
+FeederProfile(dim=4, pool=2583, mix={})
+[attributes   500] loss=3.9946 length=1.139 ampacity=1.485 phase=1.371
+[attributes  1000] loss=3.9106 length=1.207 ampacity=1.388 phase=1.315
+[attributes  1500] loss=3.6705 length=1.168 ampacity=1.205 phase=1.297
+[attributes  2000] loss=3.3368 length=1.009 ampacity=1.091 phase=1.237
+[attributes  2500] loss=3.3953 length=0.987 ampacity=1.158 phase=1.251
+[attributes  3000] loss=3.2308 length=0.909 ampacity=1.086 phase=1.236
+[attributes  3500] loss=3.3584 length=0.900 ampacity=1.222 phase=1.237
+[attributes  4000] loss=3.1440 length=0.986 ampacity=0.917 phase=1.241
+[attributes  4500] loss=3.3026 length=0.948 ampacity=1.139 phase=1.216
+[attributes  5000] loss=3.3081 length=0.995 ampacity=1.073 phase=1.240
+[attributes  5500] loss=3.1036 length=0.900 ampacity=0.980 phase=1.223
+[attributes  6000] loss=3.2700 length=1.026 ampacity=1.036 phase=1.208
+checkpoints: D:\FeederGAN\framework\checkpoints\staged/topology.pt, D:\FeederGAN\framework\checkpoints\staged/attributes.pt
+done in 233.0 min

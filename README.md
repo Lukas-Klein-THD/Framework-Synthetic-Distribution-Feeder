@@ -173,40 +173,76 @@ gridgen/                     the framework — interfaces only, NumPy only
   evaluation/   Descriptor, Distance, Metric, Evaluator, Scorecard
   pipeline.py   end-to-end run
 
-plugins/feedergan/           reference implementation (PyTorch, OpenDSS)
-  config.py     paths and hyperparameters, all in one place
+plugins/distribution/        shared domain plugin: data, constraints, metrics
+  config.py     data location, graph size, power-flow operating point
   data.py       DataSource over preprocessed tensors + category labeller
-  layers.py     shared directed-GIN encoder
-  topology.py   Stage 1 — adversarial topology model
+  derived.py    attributes computed from a finished feeder
+  constraints.py phase subset (hard) and ampacity tapering (soft)
+  metrics.py    descriptors, distances, attribute encoder
+  powerflow.py  OpenDSS snapshot solve as a metric
+  reconstruction.py  soft adjacency -> graph (Algorithm 2), BFS relabelling
+
+plugins/staged/              reference model 1: topology, then attributes
+  topology.py   Stage 1 — adversarial topology model, radial by construction
   profile.py    feeder-level conditioning vector
   attributes.py Stage 2 — conditional mixture density model
-  derived.py    Stage 3 — attributes computed, not learned
-  constraints.py phase-subset (hard) and ampacity-tapering (soft)
-  metrics.py    descriptors, distances, two ready-made suites
-  powerflow.py  OpenDSS snapshot solve as a metric
   training.py   training loops for both stages
 
+plugins/feedergan_improved/  reference model 2: topology and attributes jointly
+  encoding.py   attribute representation
+  networks.py   generator and critic
+  generator.py  the FeederGenerator adapter
+  training.py   WGAN-GP training
+
+examples/train.py            train either model on the shared data
+examples/compare.py          score both models under one evaluation
 examples/quickstart.py       end-to-end walkthrough
 docs/adding_a_model.md       how to plug in your own components
 tests/                       interface tests + plugin tests
 ```
 
-## Reference plugin
+## Reference models
 
-`plugins/feedergan/` is a complete worked example: a three-stage generator
-(adversarial topology → conditional mixture-density attributes → computed derived
-attributes), two electrical constraints, a metric suite and a power-flow
-evaluator. It depends on nothing outside its own package, and each module
-implements exactly one framework interface, so it doubles as a template.
+Two models with opposite designs show that the framework compares approaches
+rather than describing one:
+
+| | `staged` | `feedergan-improved` |
+|---|---|---|
+| Interface | `TopologyGenerator` + `AttributeGenerator`, composed by `StagedGenerator` | `FeederGenerator` directly |
+| Topology | autoregressive parent selection, a tree by construction | soft adjacency, reconstructed with FeederGAN's Algorithm 2 |
+| Attributes | maximum likelihood on given topologies, feeder-level profile | generated with the topology in one pass, judged by a graph critic |
+| Training | WGAN-GP (Stage 1), MLE (Stage 2) | WGAN-GP on the joint output |
+
+Both read the same data (every feeder and sub-feeder with at least 128 nodes,
+truncated to its first 128 BFS nodes) and are scored by the same metric
+instances against the same real reference set:
 
 ```bash
-python examples/quickstart.py --train      # train both stages, then evaluate
-python examples/quickstart.py --category rural
+python examples/train.py --model staged --device cuda
+python examples/train.py --model feedergan-improved --device cuda
+python examples/compare.py --n 512 --device cuda
 ```
 
-To add your own model, start from `docs/adding_a_model.md`.
+Each model plugin depends only on `plugins/distribution`, so it doubles as a
+template. To add your own model, start from `docs/adding_a_model.md`.
+
+## Data
+
+The models are trained on preprocessed feeder graphs built from public
+distribution-network models (NREL SMART-DS SFO-2018, and the GSO and SAF base
+networks), one `.pt` file per feeder or sub-feeder. Each node is a line segment;
+switching and protection devices are merged into the segments they connect, and
+lengths are in km. Point the framework at the files with
+
+```bash
+export GRIDGEN_DATA_DIR=/path/to/tensors_v2
+```
+
+The power-flow metric also needs a SMART-DS `Linecodes.dss`
+(`GRIDGEN_LINECODES`) and `dss-python`. Tests that need the data skip
+themselves when it is not available.
 
 ## Status
 
-Interfaces are complete, the reference plugin trains and evaluates end to end,
-and both are covered by the test suite (`pytest tests/`).
+Interfaces are complete, both reference models train and evaluate end to end,
+and everything is covered by the test suite (`pytest tests/`).

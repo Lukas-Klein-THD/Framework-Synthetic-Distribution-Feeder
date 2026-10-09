@@ -58,7 +58,11 @@ class DegreeHistogram(Descriptor):
 
 
 class LaplacianSpectrum(Descriptor):
-    """Histogram of Laplacian eigenvalues — global structure."""
+    """Histogram of normalised-Laplacian eigenvalues — global structure.
+
+    The normalised Laplacian ``I - D^-1/2 A D^-1/2`` has its spectrum in [0, 2]
+    for every graph, so a fixed histogram over that range loses nothing.
+    """
 
     def __init__(self, bins: int = 200):
         self.bins = bins
@@ -68,58 +72,73 @@ class LaplacianSpectrum(Descriptor):
         return "spectrum"
 
     def __call__(self, feeders: Sequence[Feeder]) -> np.ndarray:
+        edges = np.linspace(0.0, 2.0, self.bins + 1)
         rows = []
         for f in feeders:
             u = _undirected(f.adjacency)
-            laplacian = np.diag(u.sum(1)) - u
-            eigenvalues = np.linalg.eigvalsh(laplacian)
-            hist, _ = np.histogram(eigenvalues, bins=self.bins, range=(0.0, 2.0))
+            d = u.sum(1)
+            inv = np.divide(1.0, np.sqrt(d), out=np.zeros_like(d), where=d > 0)
+            laplacian = np.eye(len(d)) - inv[:, None] * u * inv[None, :]
+            hist, _ = np.histogram(np.linalg.eigvalsh(laplacian), bins=edges)
             rows.append(hist.astype(float) / max(hist.sum(), 1.0))
         return np.stack(rows)
 
 
 class RandomGINEmbedding(Descriptor):
-    """Graph embedding from an untrained GIN.
+    """Graph embedding from an untrained GIN (Thompson et al., 2022).
 
     An untrained encoder is a fixed, dataset-agnostic feature map, so the metric
-    cannot overfit to either population.  Node inputs may carry attributes, in
-    which case the embedding reflects the *joint* of structure and attributes
-    rather than structure alone.
+    cannot overfit to either population.  Configuration of GGM-metrics: a linear
+    projection, three GIN layers ``h <- MLP(h + A h)`` with two-layer MLPs and
+    hidden width 35, sum pooling of every layer, concatenated (jumping
+    knowledge).  Node input is the node degree, or the attribute vector from
+    ``encoder``, in which case the embedding reflects the *joint* of structure
+    and attributes rather than structure alone.  Weights use PyTorch's default
+    initialisation under a fixed seed.
     """
 
     def __init__(self, layers: int = 3, hidden: int = 35, seed: int = 0,
                  encoder=None):
         self.layers, self.hidden, self.seed = layers, hidden, seed
         self.encoder = encoder                     # optional attribute encoder
-        self._weights: list[tuple[np.ndarray, np.ndarray]] | None = None
+        self._net = None
 
     @property
     def name(self) -> str:
         return "gin-attributed" if self.encoder else "gin"
 
-    def _init(self, in_dim: int) -> None:
-        rng = np.random.default_rng(self.seed)
-        dims = [in_dim] + [self.hidden] * self.layers
-        self._weights = [
-            (rng.normal(0, np.sqrt(2.0 / dims[i]), (dims[i], dims[i + 1])),
-             rng.normal(0, 0.1, dims[i + 1]))
-            for i in range(self.layers)]
+    def _build(self, in_dim: int):
+        import torch
+        import torch.nn as nn
+        with torch.random.fork_rng():
+            torch.manual_seed(self.seed)
+            proj = nn.Linear(in_dim, self.hidden)
+            gins = nn.ModuleList([
+                nn.Sequential(nn.Linear(self.hidden, self.hidden), nn.ReLU(),
+                              nn.Linear(self.hidden, self.hidden), nn.ReLU())
+                for _ in range(self.layers)])
+        for p in list(proj.parameters()) + list(gins.parameters()):
+            p.requires_grad_(False)
+        self._net = (proj, gins)
 
     def __call__(self, feeders: Sequence[Feeder]) -> np.ndarray:
+        import torch
         rows = []
         for f in feeders:
-            u = _undirected(f.adjacency)
-            x = (self.encoder(f) if self.encoder
-                 else np.ones((f.num_nodes, 1), dtype=float))
-            if self._weights is None:
-                self._init(x.shape[1])
-            pooled = []
-            h = x
-            for weight, bias in self._weights:
-                h = np.maximum((h + u @ h) @ weight + bias, 0.0)   # sum aggregation
-                pooled.append(h.sum(0))                            # sum readout
-            rows.append(np.concatenate(pooled))                    # jumping knowledge
-        return np.stack(rows)
+            u = torch.as_tensor(_undirected(f.adjacency), dtype=torch.float32)
+            x = (torch.as_tensor(self.encoder(f), dtype=torch.float32) if self.encoder
+                 else u.sum(1, keepdim=True))                          # degree
+            if self._net is None:
+                self._build(x.shape[1])
+            proj, gins = self._net
+            with torch.no_grad():
+                h = proj(x)
+                pooled = []
+                for gin in gins:
+                    h = gin(h + u @ h)                                 # sum aggregation
+                    pooled.append(h.sum(0))                            # sum readout
+            rows.append(torch.cat(pooled).numpy())                     # jumping knowledge
+        return np.stack(rows).astype(np.float64)
 
 
 # ── distances ────────────────────────────────────────────────────────────────
@@ -206,6 +225,64 @@ class PrecisionRecallDensityCoverage(Distance):
         return d[:, min(self.k, d.shape[1] - 1)]
 
 
+# ── tree check ───────────────────────────────────────────────────────────────
+def is_radial_tree(adjacency: np.ndarray) -> bool:
+    """Connected, acyclic, single-rooted: one node without a parent, every other
+    node with exactly one, and every node reachable from the root."""
+    a = np.asarray(adjacency) != 0
+    m = a.shape[0]
+    in_degree = a.sum(0)
+    roots = np.flatnonzero(in_degree == 0)
+    if len(roots) != 1 or (np.delete(in_degree, roots) != 1).any():
+        return False
+    seen, frontier = {int(roots[0])}, [int(roots[0])]
+    while frontier:
+        children = np.flatnonzero(a[frontier].any(0))
+        frontier = [int(c) for c in children if int(c) not in seen]
+        seen.update(frontier)
+    return len(seen) == m
+
+
+# ── node attributes as GIN input ─────────────────────────────────────────────
+class AttributeEncoder:
+    """Per-node numeric vector for the attributed embedding.
+
+    ``length`` is log10-scaled and standardised, ``ampacity`` one-hot over the
+    observed ratings (nearest match), ``phase`` one-hot over the seven codes.
+    Fit it on **real** feeders and use the same instance for every generated
+    set, so all models are embedded identically.
+    """
+
+    def __init__(self, ampacities, log_mean: float, log_std: float,
+                 n_phase: int = 7, eps: float = 1e-3):
+        self.ampacities = np.asarray(ampacities, dtype=float)
+        self.log_mean, self.log_std = float(log_mean), float(log_std)
+        self.n_phase, self.eps = n_phase, eps
+
+    @property
+    def dim(self) -> int:
+        return 1 + len(self.ampacities) + self.n_phase
+
+    @classmethod
+    def fit(cls, feeders: Sequence[Feeder], eps: float = 1e-3) -> "AttributeEncoder":
+        length = np.concatenate([np.asarray(f.attributes["length"], float) for f in feeders])
+        amps = np.concatenate([np.asarray(f.attributes["ampacity"], float) for f in feeders])
+        log_length = np.log10(np.clip(length, 0.0, None) + eps)
+        return cls(np.unique(np.round(amps, 3)), log_length.mean(),
+                   log_length.std() + 1e-8, eps=eps)
+
+    def __call__(self, feeder: Feeder) -> np.ndarray:
+        length = np.asarray(feeder.attributes["length"], float)
+        amps = np.asarray(feeder.attributes["ampacity"], float)
+        phase = np.clip(np.asarray(feeder.attributes["phase"]).astype(int), 0, self.n_phase - 1)
+        log_length = (np.log10(np.clip(length, 0.0, None) + self.eps)
+                      - self.log_mean) / self.log_std
+        amp_idx = np.abs(amps[:, None] - self.ampacities[None, :]).argmin(1)
+        return np.concatenate([log_length[:, None],
+                               np.eye(len(self.ampacities))[amp_idx],
+                               np.eye(self.n_phase)[phase]], axis=1)
+
+
 # ── ready-made metric suite ──────────────────────────────────────────────────
 def structural_metrics(max_degree: int = 24, seed: int = 0) -> list[DescriptorMetric]:
     """Topology-only metrics."""
@@ -219,7 +296,11 @@ def structural_metrics(max_degree: int = 24, seed: int = 0) -> list[DescriptorMe
 
 
 def attributed_metrics(encoder, seed: int = 0) -> list[DescriptorMetric]:
-    """Metrics over the joint of structure and attributes."""
+    """Metrics over the joint of structure and attributes.
+
+    ``encoder`` maps a feeder to per-node vectors, normally an
+    :class:`AttributeEncoder` fitted on the real feeders.
+    """
     gin = RandomGINEmbedding(seed=seed, encoder=encoder)
     return [
         DescriptorMetric(gin, FrechetDistance()),

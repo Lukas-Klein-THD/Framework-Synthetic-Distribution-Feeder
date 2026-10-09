@@ -2,7 +2,8 @@
 
 The framework defines interfaces; everything else is a plugin. This walks through
 the three cases you are most likely to want, using the reference plugin in
-`plugins/feedergan/` as the worked example.
+`plugins/staged/` (staged) and `plugins/feedergan_improved/` (joint) as
+worked examples, and the shared domain plugin `plugins/distribution/`.
 
 The rule to keep in mind: **implement the narrowest interface that fits.** A model
 that only produces graphs should be a `TopologyGenerator`, not a
@@ -35,9 +36,17 @@ Note the schema: this model declares `radial=False` and a variable node count.
 Nothing else has to change — metrics and constraints read the schema rather than
 assuming, and `Feeder.validate(schema)` will check conformance for you.
 
+A complete example is `plugins/feedergan_improved/generator.py`: it samples,
+reconstructs a graph from a soft adjacency, relabels trees so the root is node 0,
+and returns `Feeder` objects.  It declares the same radial schema as the data
+even though it cannot guarantee a tree, so the pipeline's schema check reports
+non-trees instead of hiding them.  Do the
+same: declare what the model is *meant* to produce, and let the evaluation say
+how often it does.
+
 ## 2. Replacing one stage of a staged pipeline
 
-Implement `TopologyGenerator` (see `plugins/feedergan/topology.py`):
+Implement `TopologyGenerator` (see `plugins/staged/topology.py`):
 
 ```python
 @register("topology_generator", "my-topology")
@@ -81,7 +90,7 @@ metric = DescriptorMetric(MyDescriptor(), MaximumMeanDiscrepancy())
 A new descriptor immediately works with every existing distance, and vice versa.
 For something that reads the graph directly — a power-flow solve, a domain
 statistic — implement `Metric` instead and return a mapping of named scores
-(see `plugins/feedergan/powerflow.py`).
+(see `plugins/distribution/powerflow.py`).
 
 **Declare a direction.** A scorecard mixing "lower is better" and "higher is
 better" without labels is unreadable.
@@ -117,7 +126,7 @@ a rule violated on 3% of edges can still leave 90% of feeders invalid.
 
 ## 5. Adding a data source
 
-Implement `__len__`, `__getitem__` and `schema` (see `plugins/feedergan/data.py`).
+Implement `__len__`, `__getitem__` and `schema` (see `plugins/distribution/data.py`).
 Grouping, filtering and category views come from the base class. Keep
 classification in a separate `CategoryLabeler`: how a feeder is labelled — folder
 layout, naming convention, clustering — is independent of how it is loaded.

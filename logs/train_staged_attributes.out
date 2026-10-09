@@ -1,0 +1,16 @@
+TensorFeederSource(n=2583, M=128)
+FeederProfile(dim=4, pool=2583, mix={})
+[attributes   500] loss=4.4890 length=1.103 ampacity=1.512 phase=1.874
+[attributes  1000] loss=4.0504 length=1.171 ampacity=1.524 phase=1.356
+[attributes  1500] loss=3.6385 length=1.042 ampacity=1.128 phase=1.469
+[attributes  2000] loss=3.2954 length=0.941 ampacity=1.091 phase=1.263
+[attributes  2500] loss=3.3917 length=0.965 ampacity=1.153 phase=1.274
+[attributes  3000] loss=3.2382 length=0.879 ampacity=1.101 phase=1.258
+[attributes  3500] loss=3.3340 length=0.868 ampacity=1.214 phase=1.252
+[attributes  4000] loss=3.1480 length=0.945 ampacity=0.937 phase=1.266
+[attributes  4500] loss=3.4428 length=0.919 ampacity=1.136 phase=1.388
+[attributes  5000] loss=3.2941 length=0.959 ampacity=1.080 phase=1.255
+[attributes  5500] loss=3.1106 length=0.872 ampacity=0.995 phase=1.244
+[attributes  6000] loss=3.3442 length=0.996 ampacity=1.116 phase=1.233
+checkpoints: D:\FeederGAN\framework\checkpoints\staged/topology.pt, D:\FeederGAN\framework\checkpoints\staged/attributes.pt
+done in 3.2 min

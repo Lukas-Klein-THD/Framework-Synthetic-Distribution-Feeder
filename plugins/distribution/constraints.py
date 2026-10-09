@@ -7,8 +7,8 @@ Two rules, deliberately of different kinds, because the distinction matters:
   parent does not supply.  Real feeders satisfy it exactly, so the target is 1.0.
 * **Ampacity tapering** is a soft engineering tendency — conductor ratings
   usually decrease downstream, but reconductoring and load pockets legitimately
-  break it.  Real feeders satisfy it on most edges but not in most feeders, so
-  forcing it to 1.0 would overshoot reality.
+  break it.  Real feeders satisfy it on about 96 % of edges but on only about
+  8 % of feeders, so forcing it to 1.0 would overshoot reality.
 
 Always call :meth:`Constraint.calibrate` on real data before judging generated
 feeders: that is what tells you which kind of rule you are looking at, and what
@@ -67,7 +67,12 @@ class PhaseSubset(Constraint):
 
 @register("constraint", "ampacity-tapering")
 class AmpacityTapering(Constraint):
-    """Conductor rating should not increase downstream (conductor edges only)."""
+    """Conductor rating should not increase downstream, over every edge.
+
+    Every node is a line segment, so every parent -> child edge is a conductor
+    edge.  (When switches and fuses were nodes, their device ratings had to be
+    excluded; merging them into the segments removed that special case.)
+    """
 
     hard = False
 
@@ -80,12 +85,6 @@ class AmpacityTapering(Constraint):
 
     def check(self, feeder: Feeder) -> np.ndarray:
         parents = _parents(feeder)
-        device_type = np.asarray(feeder.attributes["device_type"])
         ampacity = np.asarray(feeder.attributes["ampacity"], dtype=float)
         child = np.arange(1, len(ampacity))
-        # only conductor -> conductor edges: switches carry device ratings, not
-        # conductor ratings, and would otherwise dilute the measurement
-        mask = (device_type[child] < 0.5) & (device_type[parents[child]] < 0.5)
-        if not mask.any():
-            return np.ones(0, dtype=bool)
-        return ampacity[child][mask] <= ampacity[parents[child]][mask] + self.tolerance
+        return ampacity[child] <= ampacity[parents[child]] + self.tolerance

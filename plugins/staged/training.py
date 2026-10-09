@@ -19,10 +19,10 @@ import torch.optim as optim
 from gridgen.core.feeder import Feeder
 from gridgen.data.base import DataSource
 
-from plugins.feedergan import config
-from plugins.feedergan.attributes import AttributeModel
-from plugins.feedergan.profile import FeederProfile
-from plugins.feedergan.topology import TreeCritic, TreeGenerator, harden
+from plugins.staged import config
+from plugins.staged.attributes import AttributeModel
+from plugins.staged.profile import FeederProfile
+from plugins.staged.topology import TreeCritic, TreeGenerator, harden
 
 
 def _batches(source: DataSource, batch_size: int, seed: int = 0):
@@ -73,18 +73,20 @@ def train_topology(source: DataSource, cfg: config.TopologyConfig | None = None,
 
         z = torch.randn(cfg.batch_size, cfg.num_nodes, cfg.noise_dim, device=device)
         fake = generator(z)
-        # weak anti-star nudge: keeps internal out-degree near one without
-        # suppressing the branching real feeders need
-        internal = (fake.sum(2) > 0.3).float()
-        branch = ((fake.sum(2) - 1.0) ** 2 * internal).sum(1).mean()
+        # weak anti-star nudge: pulls internal out-degree towards one, averaged
+        # over internal nodes so its weight does not grow with feeder size
+        out_degree = fake.sum(2)
+        internal = (out_degree > cfg.internal_threshold).float()
+        branch = ((out_degree - 1.0) ** 2 * internal).sum() / internal.sum().clamp_min(1.0)
         loss_g = -critic(fake).mean() + cfg.lambda_branch * branch
         opt_g.zero_grad(); loss_g.backward(); opt_g.step()
 
         if step % log_every == 0 or step == cfg.iterations:
             info = {"step": step, "loss_d": loss_d.item(), "loss_g": loss_g.item(),
                     "tau": tau}
-            torch.save({"generator": generator.state_dict(), "config": asdict(cfg)},
-                       os.path.join(out_dir, "topology.pt"))
+            blob = {"generator": generator.state_dict(), "config": asdict(cfg)}
+            torch.save(blob, os.path.join(out_dir, "topology.pt"))          # latest
+            torch.save(blob, os.path.join(out_dir, f"topology_iter_{step}.pt"))
             if on_log:
                 on_log(step, info)
             else:
@@ -115,9 +117,12 @@ def train_attributes(source: DataSource, cfg: config.AttributeConfig | None = No
     profile = FeederProfile.fit(feeders)
     print(profile.summary())
 
+    # class sets and normalisation from every training feeder: rare ratings and
+    # two-phase codes (about 1 % of nodes each) are missed by a prefix of the
+    # stored order, and a class absent here can never be generated
     model = AttributeModel(cfg).to(device)
     sample = {name: torch.as_tensor(
-        np.concatenate([f.attributes[name] for f in feeders[:256]]),
+        np.concatenate([f.attributes[name] for f in feeders]),
         dtype=torch.float32, device=device) for name in AttributeModel.ORDER}
     model.fit(sample)
     model.to(device)

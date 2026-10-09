@@ -1,9 +1,12 @@
 """
 Data source for preprocessed feeder tensors.
 
-Reads ``.pt`` files containing a device-as-node feeder and presents them as
+Reads ``.pt`` files containing a segment-as-node feeder and presents them as
 :class:`~gridgen.core.feeder.Feeder` objects.  This is the only module that knows
 the on-disk format; everything downstream sees the framework's data model.
+
+Every node is a line segment: switching and protection devices are merged into
+the segments they connect, and lengths are true km.
 
 Each stored graph is a binary, BFS-ordered, upper-triangular, in-degree-one tree
 rooted at node 0.  Because BFS ordering guarantees that a parent precedes its
@@ -26,16 +29,12 @@ from gridgen.core.feeder import (
 from gridgen.core.registry import register
 from gridgen.data.base import CategoryLabeler, DataSource
 
-from plugins.feedergan import config
+from plugins.distribution import config
 
-#: Attributes the reference pipeline generates, in a fixed order.
+#: Organic attributes every model generates, in a fixed order.
 ATTRIBUTES = (
-    AttributeSpec("device_type", AttributeKind.CATEGORICAL,
-                  n_classes=len(config.DEVICE_TYPES),
-                  values=tuple(float(i) for i in range(len(config.DEVICE_TYPES))),
-                  description="line / switch / fuse / recloser"),
-    AttributeSpec("length", AttributeKind.CONTINUOUS, unit="kft",
-                  description="segment length; non-conductors carry a placeholder"),
+    AttributeSpec("length", AttributeKind.CONTINUOUS, unit="km",
+                  description="segment length"),
     AttributeSpec("ampacity", AttributeKind.CATEGORICAL,
                   description="conductor current rating (observed class set)"),
     AttributeSpec("phase", AttributeKind.CATEGORICAL,
@@ -49,18 +48,6 @@ def schema(num_nodes: int = config.NUM_NODES) -> FeederSchema:
     """The schema real and generated feeders both satisfy."""
     return FeederSchema(GraphSpec(directed=True, radial=True, root=0,
                                   num_nodes=num_nodes), ATTRIBUTES)
-
-
-def _device_type_code(name: str) -> int:
-    """Device class from the OpenDSS element name."""
-    n = name.lower()
-    if "fuse" in n:
-        return 2
-    if "recloser" in n:
-        return 3
-    if "switch" in n:
-        return 1
-    return 0
 
 
 @register("data_source", "feeder-tensors")
@@ -81,16 +68,34 @@ class TensorFeederSource(DataSource):
         normally exclude them.
     labeler:
         Optional :class:`CategoryLabeler` applied on load.
+    cache:
+        Keep loaded feeders in memory.  Training touches every graph many
+        times; at M = 128 the full set is about 170 MB.
+    extras:
+        Additional stored quantities to load as attributes, for models that
+        learn them: ``"distance"`` (km from the source), ``"pseudo_load"``
+        (downstream transformer kVA, over the full feeder) and ``"level"``
+        (FeederGAN level class).  They are not part of the schema; evaluation
+        uses only the organic attributes.
     """
+
+    EXTRAS = ("distance", "pseudo_load", "level")
 
     def __init__(self, directory: str | None = None,
                  num_nodes: int = config.NUM_NODES,
                  include_decomposed: bool = True,
                  labeler: "CategoryLabeler | None" = None,
-                 max_graphs: int | None = None):
+                 max_graphs: int | None = None,
+                 cache: bool = True,
+                 extras: Sequence[str] = ()):
+        unknown = set(extras) - set(self.EXTRAS)
+        if unknown:
+            raise ValueError(f"unknown extras {sorted(unknown)}; choose from {self.EXTRAS}")
+        self.extras = tuple(extras)
         self.directory = os.path.abspath(directory or config.DATA_DIR)
         self.num_nodes = num_nodes
         self.labeler = labeler
+        self._cache: dict[int, Feeder] | None = {} if cache else None
         if not os.path.isdir(self.directory):
             raise FileNotFoundError(
                 f"data directory not found: {self.directory}. Set GRIDGEN_DATA_DIR "
@@ -117,20 +122,30 @@ class TensorFeederSource(DataSource):
         return len(self._paths)
 
     def __getitem__(self, index: int) -> Feeder:
+        if self._cache is not None and index in self._cache:
+            return self._cache[index]
+        feeder = self._load(index)
+        if self._cache is not None:
+            self._cache[index] = feeder
+        return feeder
+
+    def _load(self, index: int) -> Feeder:
         import torch
         blob = torch.load(self._paths[index], map_location="cpu", weights_only=False)
         tensors, meta = blob["tensors"], blob["meta"]
         m = self.num_nodes
 
         adjacency = tensors["A_raw"].numpy()[:m, :m].astype(np.float32)
-        numeric = tensors["X_num_raw"].numpy()[:m]          # length, ampacity, ...
-        names = meta["nodes"][:m]
+        numeric = tensors["X_num_raw"].numpy()[:m]          # km, A, km, kVA
         attributes = {
-            "device_type": np.array([_device_type_code(n) for n in names], dtype=np.float32),
             "length": numeric[:, 0].astype(np.float32),
             "ampacity": numeric[:, 1].astype(np.float32),
             "phase": tensors["phase_labels"].numpy()[:m].astype(np.float32),
         }
+        stored = {"distance": numeric[:, 2], "pseudo_load": numeric[:, 3],
+                  "level": tensors["level_labels"].numpy()[:m]}
+        for name in self.extras:
+            attributes[name] = stored[name].astype(np.float32)
         feeder = Feeder(adjacency, attributes,
                         {"source": meta.get("source_file"), "path": self._paths[index]})
         return self.labeler.apply(feeder) if self.labeler else feeder

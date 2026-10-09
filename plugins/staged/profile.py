@@ -26,36 +26,27 @@ from typing import Sequence
 import numpy as np
 import torch
 
-#: Components of the profile, in vector order.
-PROFILE_FIELDS = ("switch_fraction", "fuse_fraction", "log_length_mean",
-                  "log_length_std", "log_ampacity_mean", "phase_entropy")
+#: Components of the profile, in vector order.  Every node is a line segment,
+#: so the statistics are taken over all nodes.
+PROFILE_FIELDS = ("log_length_mean", "log_length_std", "log_ampacity_mean",
+                  "phase_entropy")
 
 
 def compute_raw(attributes: dict[str, np.ndarray], n_phase: int = 7,
                 eps: float = 1e-3) -> np.ndarray:
     """Un-standardised profile for one feeder."""
-    device_type = np.asarray(attributes["device_type"])
-    length = np.clip(np.asarray(attributes["length"]), 0.0, None)
-    ampacity = np.clip(np.asarray(attributes["ampacity"]), 0.0, None)
+    length = np.clip(np.asarray(attributes["length"], dtype=float), 0.0, None)
+    ampacity = np.clip(np.asarray(attributes["ampacity"], dtype=float), 0.0, None)
     phase = np.clip(np.asarray(attributes["phase"]).astype(int), 0, n_phase - 1)
 
-    conductor = device_type < 0.5
     log_length = np.log10(length + eps)
     log_ampacity = np.log10(ampacity + eps)
-    sel = conductor if conductor.any() else np.ones_like(conductor, dtype=bool)
-
     counts = np.bincount(phase, minlength=n_phase).astype(float)
     p = counts / max(counts.sum(), 1.0)
     entropy = float(-(p[p > 0] * np.log(p[p > 0])).sum())
 
-    return np.array([
-        float((np.abs(device_type - 1) < 0.5).mean()),
-        float((np.abs(device_type - 2) < 0.5).mean()),
-        float(log_length[sel].mean()),
-        float(log_length[sel].std()),
-        float(log_ampacity[sel].mean()),
-        entropy,
-    ], dtype=np.float32)
+    return np.array([log_length.mean(), log_length.std(), log_ampacity.mean(), entropy],
+                    dtype=np.float32)
 
 
 class FeederProfile:

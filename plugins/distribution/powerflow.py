@@ -19,6 +19,11 @@ Two points of interpretation:
 * ``within_ampacity`` is measured against the **generated** rating, so a model
   that assigns implausibly small conductors is penalised.
 
+The harness omits capacitors, regulators and service transformers and uses one
+linecode library for every feeder.  Even real feeders therefore fall partly
+outside ANSI Range A at a realistic load, so the scores support comparisons
+between generated and real feeders, not absolute compliance claims.
+
 Requires ``dss-python``; the metric reports itself as unavailable if absent.
 """
 
@@ -33,8 +38,7 @@ from gridgen.core.feeder import Feeder
 from gridgen.core.registry import register
 from gridgen.evaluation.base import Direction, Metric
 
-from plugins.feedergan import config
-from plugins.feedergan.constraints import PHASE_BITS
+from plugins.distribution import config
 
 #: OpenDSS node suffixes per phase code, and the phase count.
 PHASE_NODES = (".1", ".2", ".3", ".1.2", ".2.3", ".1.3", ".1.2.3")
@@ -86,30 +90,24 @@ def to_commands(feeder: Feeder, library: LinecodeLibrary,
     """Translate one feeder into an OpenDSS circuit definition."""
     adjacency = np.asarray(feeder.adjacency)
     parents = adjacency.argmax(axis=0)
-    device = np.asarray(feeder.attributes["device_type"]).astype(int)
-    length = np.clip(np.asarray(feeder.attributes["length"], dtype=float), 1e-4, None)
+    length = np.clip(np.asarray(feeder.attributes["length"], dtype=float), 1e-6, None)
     ampacity = np.clip(np.asarray(feeder.attributes["ampacity"], dtype=float), 1.0, None)
     phase = np.clip(np.asarray(feeder.attributes["phase"]).astype(int), 0, 6)
     to_feet = _UNITS_TO_FEET[cfg.length_units]
 
     cmds = ["clear",
-            f"new circuit.feeder basekv={cfg.base_kv} pu=1.0 phases=3 bus1=n0"]
+            f"new circuit.feeder basekv={cfg.base_kv} pu={cfg.source_pu} phases=3 bus1=n0"]
     for j in range(1, adjacency.shape[0]):
         p = int(parents[j])
         nodes, n_ph = PHASE_NODES[phase[j]], PHASE_COUNT[phase[j]]
         bus1, bus2 = f"n{p}{nodes}", f"n{j}{nodes}"
-        if device[j] == 0:
-            r1, x1 = library.pick(n_ph, float(ampacity[j]))
-            # zero-sequence must be given explicitly: the OpenDSS defaults are in
-            # ohms per mile and would dwarf these per-foot values
-            cmds.append(f"new line.l{j} bus1={bus1} bus2={bus2} phases={n_ph} "
-                        f"r1={r1:.8g} x1={x1:.8g} r0={r1:.8g} x0={x1:.8g} c1=0 c0=0 "
-                        f"normamps={ampacity[j]:.1f} "
-                        f"length={length[j] * to_feet:.4f} units=ft")
-        else:
-            cmds.append(f"new line.sw{j} bus1={bus1} bus2={bus2} phases={n_ph} "
-                        f"switch=yes r1=1e-4 x1=1e-5 r0=1e-4 x0=1e-5 c1=0 c0=0 "
-                        f"length=1 units=ft")
+        r1, x1 = library.pick(n_ph, float(ampacity[j]))
+        # zero-sequence must be given explicitly: the OpenDSS defaults are in
+        # ohms per mile and would dwarf these per-foot values
+        cmds.append(f"new line.l{j} bus1={bus1} bus2={bus2} phases={n_ph} "
+                    f"r1={r1:.8g} x1={x1:.8g} r0={r1:.8g} x0={x1:.8g} c1=0 c0=0 "
+                    f"normamps={ampacity[j]:.1f} "
+                    f"length={length[j] * to_feet:.4f} units=ft")
 
     for j in range(adjacency.shape[0]):
         n_ph = PHASE_COUNT[phase[j]]

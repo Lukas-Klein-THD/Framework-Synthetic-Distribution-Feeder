@@ -23,44 +23,56 @@ from gridgen.core.feeder import GraphSpec
 from gridgen.core.registry import register
 from gridgen.generation.base import TopologyGenerator
 
-from plugins.feedergan import config
-from plugins.feedergan.layers import bfs_position_encoding
+from plugins.staged import config
+from plugins.staged.layers import DirectedGINLayer, directed_row_normalize, sinusoidal_encoding, structural_inputs
 
 
 class TreeGenerator(nn.Module):
-    """Noise -> soft parent-assignment matrix (upper triangular)."""
+    """Noise -> soft parent-assignment matrix (upper triangular).
+
+    A Transformer turns per-node noise plus a BFS position encoding into node
+    embeddings; node ``j`` then scores every already-placed node as its parent
+    by query-key attention.  Each candidate's key is shifted by a learned
+    function of its current out-degree, which gives the model explicit control
+    over branching.  That correction starts at zero, so training begins from
+    plain attention scoring.
+    """
 
     def __init__(self, cfg: config.TopologyConfig):
         super().__init__()
         self.cfg = cfg
         h = cfg.hidden
-        self.embed = nn.Sequential(nn.Linear(cfg.noise_dim, h), nn.LayerNorm(h))
+        self.fc_in = nn.Sequential(nn.Linear(cfg.noise_dim, h), nn.LayerNorm(h))
         layer = nn.TransformerEncoderLayer(
-            d_model=h, nhead=cfg.heads, dim_feedforward=2 * h,
-            batch_first=True, norm_first=True, dropout=0.0)
-        self.body = nn.TransformerEncoder(layer, num_layers=cfg.layers,
-                                          enable_nested_tensor=False)
-        self.query = nn.Linear(h, h, bias=False)
-        self.key = nn.Linear(h, h, bias=False)
-        self.out_degree_proj = nn.Linear(1, h)
+            d_model=h, nhead=cfg.heads, dim_feedforward=4 * h, dropout=0.0,
+            activation="gelu", batch_first=True, norm_first=True)
+        self.transformer = nn.TransformerEncoder(layer, num_layers=cfg.layers,
+                                                 enable_nested_tensor=False)
+        self.W_q = nn.Linear(h, h, bias=False)
+        self.W_k = nn.Linear(h, h, bias=False)
+        self.out_deg_proj = nn.Linear(1, h)
+        nn.init.zeros_(self.out_deg_proj.weight)
+        nn.init.zeros_(self.out_deg_proj.bias)
+        nn.init.xavier_uniform_(self.W_q.weight)
+        nn.init.xavier_uniform_(self.W_k.weight)
         self.tau = cfg.tau_end
 
     def set_temperature(self, tau: float) -> None:
-        self.tau = float(tau)
+        self.tau = float(max(tau, 0.05))
 
     def forward(self, z: torch.Tensor) -> torch.Tensor:
         b, m, _ = z.shape
-        h = self.embed(z) + bfs_position_encoding(m, self.cfg.hidden, z.device)
-        h = self.body(h)
-        q, k = self.query(h), self.key(h)
+        e = self.fc_in(z) + sinusoidal_encoding(m, self.cfg.hidden, z.device).unsqueeze(0)
+        h = self.transformer(e)
+        q, k = self.W_q(h), self.W_k(h)
 
         adjacency = torch.zeros(b, m, m, device=z.device)
         out_degree = torch.zeros(b, m, device=z.device)
         for j in range(1, m):
             # candidates are the already-placed nodes, which is what makes the
             # result a tree: exactly one parent, always of lower index
-            keys = k[:, :j] + self.out_degree_proj(out_degree[:, :j].unsqueeze(-1))
-            scores = torch.bmm(q[:, j:j + 1], keys.transpose(1, 2)).squeeze(1)
+            keys = k[:, :j, :] + self.out_deg_proj(out_degree[:, :j].unsqueeze(-1))
+            scores = torch.bmm(q[:, j:j + 1, :], keys.transpose(1, 2)).squeeze(1)
             scores = scores / math.sqrt(self.cfg.hidden)
             if self.training:
                 choice = F.gumbel_softmax(scores, tau=self.tau, dim=1, hard=False)
@@ -72,37 +84,39 @@ class TreeGenerator(nn.Module):
 
 
 class TreeCritic(nn.Module):
-    """Scores a (soft) adjacency; consumes structure only, no attributes."""
+    """Directed-GIN critic over topology alone (structural node inputs only)."""
 
     def __init__(self, cfg: config.TopologyConfig):
         super().__init__()
         h = cfg.critic_hidden
-        self.input = nn.Sequential(nn.Linear(3, h), nn.GELU())
-        self.blocks = nn.ModuleList(
-            nn.Sequential(nn.Linear(2 * h, h), nn.GELU(), nn.Linear(h, h))
-            for _ in range(cfg.critic_layers))
-        readout = h * (cfg.critic_layers + 1) * 2
-        self.head = nn.Sequential(
-            nn.Linear(readout, h), nn.GELU(),
+        self.fc_node = nn.Sequential(nn.Linear(4, h), nn.LayerNorm(h), nn.GELU())
+        self.gin_layers = nn.ModuleList(DirectedGINLayer(h, h) for _ in range(cfg.critic_layers))
+        readout = 2 * (cfg.critic_layers + 1) * h
+        self.fc_out = nn.Sequential(
+            nn.Linear(readout, h), nn.LayerNorm(h), nn.GELU(),
             nn.Linear(h, h // 2), nn.GELU(), nn.Linear(h // 2, 1))
 
-    def forward(self, adjacency: torch.Tensor) -> torch.Tensor:
-        b, m, _ = adjacency.shape
-        out_deg = adjacency.sum(2, keepdim=True) / m
-        in_deg = adjacency.sum(1, keepdim=True).transpose(1, 2)
-        depth = bfs_position_encoding(m, 1, adjacency.device).expand(b, m, 1)
-        h = self.input(torch.cat([out_deg, in_deg, depth], dim=-1))
+    def forward(self, adj: torch.Tensor) -> torch.Tensor:
+        h = self.fc_node(structural_inputs(adj))
+        down = directed_row_normalize(adj.transpose(-1, -2))
+        up = directed_row_normalize(adj)
         collected = [h]
-        for block in self.blocks:
-            h = h + block(torch.cat([h, torch.bmm(adjacency, h)], dim=-1))
+        for gin in self.gin_layers:
+            h = gin(down, up, h)
             collected.append(h)
         stacked = torch.cat(collected, dim=-1)
-        pooled = torch.cat([stacked.mean(1), stacked.max(1).values], dim=-1)
-        return self.head(pooled).squeeze(-1)
+        pooled = torch.cat([stacked.mean(dim=1), stacked.max(dim=1).values], dim=-1)
+        return self.fc_out(pooled).squeeze(-1)
 
 
 def harden(adjacency: torch.Tensor) -> torch.Tensor:
-    """Soft parent assignment -> binary tree (each column keeps its argmax)."""
+    """Soft parent assignment -> binary tree: each node keeps its most likely parent.
+
+    This is FeederGAN's Algorithm 2 without the row normalisation, which would
+    penalise hubs (a node spreading its probability over many children) against
+    nodes with a single child.  For this generator's upper-triangular output it
+    reduces to a column argmax and always yields a tree rooted at node 0.
+    """
     b, m, _ = adjacency.shape
     hard = torch.zeros_like(adjacency)
     for j in range(1, m):

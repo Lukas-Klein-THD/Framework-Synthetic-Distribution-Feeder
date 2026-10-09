@@ -4,9 +4,8 @@ Stage 2 — conditional attribute generation by maximum likelihood.
 A shared encoder reads the given topology; one head per attribute then models its
 distribution.  Head types are chosen to match each attribute's statistics:
 
-    device_type   softmax          generated first, conditions the others
-    length        Gaussian mixture multimodal (device placeholders vs conductors)
-    ampacity      gated Markov     ~97% of consecutive conductors share a rating
+    length        Gaussian mixture in log space (km)
+    ampacity      gated Markov     ~77% of child segments keep the parent's rating
     phase         gated Markov     phases persist along runs, changing at branches
 
 The gated head is the piece that matters most.  It predicts a Bernoulli *change
@@ -14,7 +13,7 @@ gate* alongside a class distribution: unless the gate fires, the node copies its
 parent's value exactly.  An independent softmax leaks a change on nearly every
 edge and destroys the runs that real feeders exhibit.
 
-A six-dimensional :class:`FeederProfile` summarising the feeder as a whole is
+A four-dimensional :class:`FeederProfile` summarising the feeder as a whole is
 broadcast to every node, so attributes are coherent at feeder level rather than
 each node drifting to the population mean.
 """
@@ -32,10 +31,10 @@ from gridgen.core.feeder import FeederSchema
 from gridgen.core.registry import register
 from gridgen.generation.base import AttributeGenerator
 
-from plugins.feedergan import config
-from plugins.feedergan.data import ATTRIBUTES, schema
-from plugins.feedergan.layers import DirectedGINEncoder, gather_parent, parent_index
-from plugins.feedergan.profile import FeederProfile
+from plugins.distribution.data import schema
+from plugins.staged import config
+from plugins.staged.layers import DirectedGINEncoder, parent_index
+from plugins.staged.profile import FeederProfile
 
 LOG2PI = math.log(2.0 * math.pi)
 
@@ -185,7 +184,7 @@ class GatedMarkovHead(CategoricalHead):
 class AttributeModel(nn.Module):
     """Shared encoder plus one head per attribute."""
 
-    ORDER = ("device_type", "length", "ampacity", "phase")
+    ORDER = ("length", "ampacity", "phase")
     MARKOV = ("ampacity", "phase")
 
     def __init__(self, cfg: config.AttributeConfig | None = None):
@@ -193,17 +192,12 @@ class AttributeModel(nn.Module):
         self.cfg = cfg or config.AttributeConfig()
         self.encoder = DirectedGINEncoder(self.cfg.hidden, self.cfg.gin_layers)
         enc = self.encoder.out_dim + self.cfg.profile_dim
-        self.type_embed = nn.Embedding(len(config.DEVICE_TYPES), self.cfg.cond_dim)
         self.parent_embed = nn.ModuleDict()
 
         self.heads = nn.ModuleDict({
-            "device_type": CategoricalHead(
-                enc, self.cfg, values=list(range(len(config.DEVICE_TYPES)))),
-            "length": MixtureHead(enc + self.cfg.cond_dim, self.cfg),
-            "ampacity": GatedMarkovHead(enc + 2 * self.cfg.cond_dim + self.cfg.parent_dim,
-                                        self.cfg),
-            "phase": GatedMarkovHead(enc + 2 * self.cfg.cond_dim + self.cfg.parent_dim,
-                                     self.cfg),
+            "length": MixtureHead(enc, self.cfg),
+            "ampacity": GatedMarkovHead(enc + self.cfg.parent_dim, self.cfg),
+            "phase": GatedMarkovHead(enc + self.cfg.parent_dim, self.cfg),
         })
 
     # ── setup ────────────────────────────────────────────────────────────────
@@ -229,29 +223,20 @@ class AttributeModel(nn.Module):
         total = torch.zeros((), device=adjacency.device)
         parts: dict[str, float] = {}
 
-        total_dt = self.heads["device_type"].loss(h, attributes["device_type"])
-        total = total + total_dt
-        parts["device_type"] = float(total_dt)
-
-        type_idx = self.heads["device_type"].to_index(attributes["device_type"])
-        type_vec = self.type_embed(type_idx)                       # teacher forcing
-        parent_type = gather_parent(type_vec, parents)
-
-        length_loss = self.heads["length"].loss(
-            torch.cat([h, type_vec], -1), attributes["length"], self.cfg.lambda_balance)
+        length_loss = self.heads["length"].loss(h, attributes["length"],
+                                                self.cfg.lambda_balance)
         total = total + length_loss
-        parts["length"] = float(length_loss)
+        parts["length"] = length_loss.item()
 
         for name in self.MARKOV:
             head = self.heads[name]
             cls = head.to_index(attributes[name])
             parent_cls = torch.gather(cls, 1, parents).clone()
             parent_cls[:, 0] = head.n_classes                      # root sentinel
-            x = torch.cat([h, type_vec, parent_type,
-                           self.parent_embed[name](parent_cls)], dim=-1)
+            x = torch.cat([h, self.parent_embed[name](parent_cls)], dim=-1)
             loss = head.loss(x, attributes[name], parent_cls)
             total = total + loss
-            parts[name] = float(loss)
+            parts[name] = loss.item()
         return total, parts
 
     # ── generation ───────────────────────────────────────────────────────────
@@ -262,11 +247,7 @@ class AttributeModel(nn.Module):
         parents = parent_index(adjacency)
         out: dict[str, torch.Tensor] = {}
 
-        out["device_type"] = self.heads["device_type"].sample(h)
-        type_idx = self.heads["device_type"].to_index(out["device_type"])
-        type_vec = self.type_embed(type_idx)
-        parent_type = gather_parent(type_vec, parents)
-        out["length"] = self.heads["length"].sample(torch.cat([h, type_vec], -1))
+        out["length"] = self.heads["length"].sample(h)
 
         classes = {n: torch.zeros(b, m, dtype=torch.long, device=h.device)
                    for n in self.MARKOV}
@@ -278,8 +259,7 @@ class AttributeModel(nn.Module):
                                             device=h.device)
                 else:
                     parent_cls = classes[name].gather(1, parents[:, j:j + 1]).squeeze(1)
-                x = torch.cat([h[:, j], type_vec[:, j], parent_type[:, j],
-                               self.parent_embed[name](parent_cls)], dim=-1)
+                x = torch.cat([h[:, j], self.parent_embed[name](parent_cls)], dim=-1)
                 gate_logit, class_logits = head.forward_parts(x)
                 if constrain_phase and name == "phase":
                     class_logits = _mask_phase(class_logits, parent_cls, head.n_classes)

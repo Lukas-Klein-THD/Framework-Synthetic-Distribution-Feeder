@@ -1,5 +1,5 @@
 """
-Tests for the reference plugin.
+Tests for the staged model plugin and the shared distribution plugin.
 
 Anything needing the dataset is skipped when it is unavailable, so the suite
 still runs on a clean checkout. The tests that matter most check contracts —
@@ -15,21 +15,22 @@ import pytest
 from gridgen import (
     AttributeGenerator, Constraint, DataSource, Feeder, FeederGenerator,
     StagedGenerator, TopologyGenerator, available)
-from plugins import feedergan
-from plugins.feedergan import config, schema
-from plugins.feedergan.constraints import AmpacityTapering, PhaseSubset
-from plugins.feedergan.derived import TopologicalAttributes
-from plugins.feedergan.profile import PROFILE_FIELDS, FeederProfile, compute_raw
-from plugins.feedergan.topology import TreeGANTopology, harden
+from plugins import distribution, staged  # noqa: F401  (registration)
+from plugins.distribution import config as shared
+from plugins.distribution import schema
+from plugins.distribution.constraints import AmpacityTapering, PhaseSubset
+from plugins.distribution.derived import TopologicalAttributes
+from plugins.staged import config
+from plugins.staged.profile import PROFILE_FIELDS, FeederProfile, compute_raw
+from plugins.staged.topology import TreeGANTopology, harden
 
 
 def chain_feeder(m: int = 8, phase: int = 6, ampacity: float = 300.0) -> Feeder:
-    """A simple valid feeder: one chain, all conductors, uniform attributes."""
+    """A simple valid feeder: one chain of segments, uniform attributes."""
     adjacency = np.zeros((m, m), dtype=np.float32)
     for j in range(1, m):
         adjacency[j - 1, j] = 1.0
     return Feeder(adjacency, {
-        "device_type": np.zeros(m, dtype=np.float32),
         "length": np.full(m, 0.05, dtype=np.float32),
         "ampacity": np.full(m, ampacity, dtype=np.float32),
         "phase": np.full(m, float(phase), dtype=np.float32),
@@ -38,7 +39,7 @@ def chain_feeder(m: int = 8, phase: int = 6, ampacity: float = 300.0) -> Feeder:
 
 # ── registration ─────────────────────────────────────────────────────────────
 def test_plugin_registers_its_components():
-    assert "staged-feedergan" in available("generator")
+    assert "staged" in available("generator")
     assert "tree-gan" in available("topology_generator")
     assert "mdn" in available("attribute_generator")
     assert {"phase-subset", "ampacity-tapering"} <= set(available("constraint"))
@@ -102,11 +103,12 @@ def test_constraints_declare_hard_or_soft():
     assert AmpacityTapering().hard is False
 
 
-def test_ampacity_tapering_ignores_non_conductor_edges():
-    feeder = chain_feeder(4)
-    device = np.array(feeder.attributes["device_type"]); device[1:] = 1.0  # switches
-    flags = AmpacityTapering().check(feeder.with_attributes(device_type=device))
-    assert flags.size == 0            # no conductor->conductor edge remains
+def test_ampacity_tapering_scores_every_edge():
+    feeder = chain_feeder(4, ampacity=300.0)
+    amps = np.array(feeder.attributes["ampacity"]); amps[2] = 400.0  # one increase
+    flags = AmpacityTapering().check(feeder.with_attributes(ampacity=amps))
+    assert flags.size == 3                       # every non-root node has an edge
+    assert flags.tolist() == [True, False, True]
 
 
 def test_validation_separates_element_and_feeder_rates():
@@ -121,7 +123,8 @@ def test_validation_separates_element_and_feeder_rates():
 def test_profile_summarises_a_feeder():
     raw = compute_raw(chain_feeder(10).attributes)
     assert raw.shape == (len(PROFILE_FIELDS),)
-    assert raw[0] == 0.0                       # no switches in a conductor chain
+    assert raw[1] == pytest.approx(0.0)        # uniform lengths: no spread
+    assert raw[3] == pytest.approx(0.0)        # one phase class: zero entropy
 
 
 def test_profile_sampling_respects_category():
@@ -144,7 +147,7 @@ def test_staged_pipeline_is_a_feeder_generator():
 
 # ── data (skipped without the dataset) ───────────────────────────────────────
 def _source():
-    from plugins.feedergan.data import SourcePathLabeler, TensorFeederSource
+    from plugins.distribution.data import SourcePathLabeler, TensorFeederSource
     try:
         return TensorFeederSource(labeler=SourcePathLabeler(),
                                   include_decomposed=False, max_graphs=8)
@@ -157,7 +160,7 @@ def test_data_source_yields_schema_conforming_feeders():
     assert isinstance(source, DataSource)
     feeder = source[0]
     assert feeder.validate(source.schema) == []
-    assert feeder.num_nodes == config.NUM_NODES
+    assert feeder.num_nodes == shared.NUM_NODES
 
 
 def test_real_feeders_satisfy_the_hard_constraint():
@@ -166,3 +169,15 @@ def test_real_feeders_satisfy_the_hard_constraint():
     result = PhaseSubset().calibrate(list(source))
     assert result.element_rate == pytest.approx(1.0)
     assert result.feeder_rate == pytest.approx(1.0)
+
+
+def test_attribute_classes_cover_every_training_feeder(tmp_path):
+    """A rating or phase seen only late in the stored order must still be learnable."""
+    from plugins.staged.training import train_attributes
+    feeders = [chain_feeder(8) for _ in range(300)]
+    feeders.append(chain_feeder(8, phase=3, ampacity=170.0))
+    cfg = config.AttributeConfig(hidden=16, gin_layers=1, iterations=1, batch_size=4)
+    model, _ = train_attributes(feeders, cfg, out_dir=str(tmp_path), log_every=1,
+                                on_log=lambda *_: None)
+    assert 170.0 in model.heads["ampacity"].values.tolist()
+    assert 3.0 in model.heads["phase"].values.tolist()

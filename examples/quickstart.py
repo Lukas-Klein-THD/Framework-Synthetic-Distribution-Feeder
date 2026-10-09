@@ -1,5 +1,5 @@
 """
-End-to-end walkthrough of the framework using the reference plugin.
+End-to-end walkthrough of the framework using the staged reference model.
 
     python examples/quickstart.py --train        # train both stages, then evaluate
     python examples/quickstart.py                # evaluate existing checkpoints
@@ -21,12 +21,11 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from gridgen import Pipeline, catalogue                                # noqa: E402
-from plugins import feedergan                                          # noqa: E402
-from plugins.feedergan import build_staged, config                     # noqa: E402
-from plugins.feedergan.constraints import AmpacityTapering, PhaseSubset  # noqa: E402
-from plugins.feedergan.data import SourcePathLabeler, TensorFeederSource  # noqa: E402
-from plugins.feedergan.metrics import structural_metrics               # noqa: E402
-from plugins.feedergan.training import train_attributes, train_topology  # noqa: E402
+from plugins.distribution import (                                     # noqa: E402
+    AmpacityTapering, PhaseSubset, SourcePathLabeler, TensorFeederSource,
+    structural_metrics)
+from plugins.staged import build_staged, config                        # noqa: E402
+from plugins.staged.training import train_attributes, train_topology   # noqa: E402
 
 
 def main() -> None:
@@ -64,8 +63,9 @@ def main() -> None:
 
     # 3. Generator ---------------------------------------------------------
     # Three independent stages composed into one FeederGenerator. A model that
-    # generated everything at once would implement FeederGenerator directly and
-    # be used identically from here on.
+    # generates everything at once implements FeederGenerator directly and is
+    # used identically from here on -- see plugins/feedergan_improved and
+    # examples/compare.py, which scores both models side by side.
     generator = build_staged(topology_ckpt, attribute_ckpt, device=args.device)
     print(generator, "| supports categories:", generator.categories or "(none)")
 
@@ -73,7 +73,7 @@ def main() -> None:
     constraints = [PhaseSubset(), AmpacityTapering()]
     metrics = structural_metrics()
     if args.linecodes:
-        from plugins.feedergan.powerflow import PowerFlowFeasibility
+        from plugins.distribution.powerflow import PowerFlowFeasibility
         metrics = metrics + [PowerFlowFeasibility(linecodes=args.linecodes)]
 
     # 5. Run ---------------------------------------------------------------
