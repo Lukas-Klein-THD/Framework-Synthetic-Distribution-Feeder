@@ -6,9 +6,12 @@ Example feeders and the stage-localisation figure, in the IEEE style.
     example_feeders        real, staged and improved FeederGAN feeders side by side,
                            segments coloured by phase count (full text width);
                            one row, and a two-row variant
-    baseline_localisation  attributed precision against recall for trained and
-                           untrained components at each stage, plus the improved
-                           FeederGAN (one column); numbers from full_results.py
+    fidelity_diversity     Table I as a figure: precision against recall for
+                           structure and for structure with attributes
+    baseline_localisation  Table III as a figure: trained and untrained components
+                           at each stage, plus the improved FeederGAN
+    Both use the mean and standard deviation over the GIN seeds of
+    gin_seed_sweep.py (one column each).
 
 The feeders are the first draws of the sets scored by ``compare.py`` and
 ``full_results.py`` (same pool split, seeds and sampling order), not picked by
@@ -126,11 +129,57 @@ def example_feeders(sets, out_dir, rows):
     plt.close(fig)
 
 
-def baseline_localisation(numbers, out_dir):
-    rows = numbers["baselines"]
+STRUCT_KEYS = ("gin.prdc.precision", "gin.prdc.recall")
+ATTR_KEYS = ("gin-attributed.prdc.precision", "gin-attributed.prdc.recall")
+PANELS = [(STRUCT_KEYS, "Structure"), (ATTR_KEYS, "Structure and attributes")]
+
+
+def _pr_panels(rows, points, out_dir, name, height, legend_cols):
+    """Precision against recall, one panel per metric family; mean and std over GIN seeds."""
+    fig, axes = paper_style.subplots(1, 2, height, sharex=True, sharey=True)
+    for ax, (keys, title) in zip(axes, PANELS):
+        for key, label, style in points:
+            r = rows.get(key, {})
+            if keys[0] not in r:
+                continue
+            (px, rx) = (r[keys[0]], r[keys[1]])
+            colour = style.get("color", style.get("edgecolors"))
+            ax.errorbar(px["mean"], rx["mean"], xerr=px["std"], yerr=rx["std"], fmt="none",
+                        ecolor=colour, elinewidth=0.6, capsize=1.2, zorder=2)
+            ax.scatter(px["mean"], rx["mean"], s=20, linewidths=0.9, label=label,
+                       zorder=3, **style)
+        ax.set_title(title)
+        ax.set_xlabel("Precision")
+        ax.set_xlim(-0.04, 1.04)
+        ax.set_ylim(-0.04, 1.04)
+        ax.set_xticks([0, 0.5, 1])
+        ax.set_yticks([0, 0.5, 1])
+        ax.grid(True, alpha=0.4)
+        ax.set_axisbelow(True)
+    axes[0].set_ylabel("Recall")
+    fig.legend(*axes[1].get_legend_handles_labels(), loc="outside lower center",
+               ncol=legend_cols, frameon=False, handletextpad=0.3, labelspacing=0.25,
+               columnspacing=1.0)
+    paper_style.save(fig, out_dir, name)
+    plt.close(fig)
+
+
+def fidelity_diversity(seeds, out_dir):
+    """Table I as a figure: the two models and the real reference."""
+    points = [
+        ("real vs real", "Real feeders", dict(marker="o", color="0.45")),
+        ("staged", "Staged model", dict(marker="s", color="#1f5fa8")),
+        ("feedergan-improved", "Improved FeederGAN", dict(marker="^", color="#d1731d")),
+    ]
+    _pr_panels(seeds["table1"], points, out_dir, "fidelity_diversity", 1.95, 3)
+
+
+def baseline_localisation(seeds, out_dir):
+    """Table III as a figure: the topology swap moves the structure panel, the
+    attribute swap moves recall in the attributed panel."""
     # marker shape = topology source, fill = attribute source
     points = [
-        ("real (floor)", "Real feeders", dict(marker="o", color="0.45")),
+        ("real vs real", "Real feeders", dict(marker="o", color="0.45")),
         ("GAN + MDN (staged)", "Topology GAN and attribute model (staged)",
          dict(marker="s", color="#1f5fa8")),
         ("GAN + i.i.d. echo", "Topology GAN and independent attributes",
@@ -139,36 +188,32 @@ def baseline_localisation(numbers, out_dir):
          dict(marker="v", color="#1f5fa8")),
         ("random tree + echo", "Random tree and independent attributes",
          dict(marker="v", facecolors="none", edgecolors="#1f5fa8")),
-        ("feedergan-improved", "Improved FeederGAN", dict(marker="^", color="#d1731d")),
+        ("feedergan-improved", "Improved FeederGAN (joint)", dict(marker="^", color="#d1731d")),
     ]
-    fig, ax = paper_style.subplots(1, 1, 3.0)
-    for key, label, style in points:
-        r = rows[key]
-        ax.scatter(r["gin-attributed.prdc.precision"], r["gin-attributed.prdc.recall"],
-                   s=22, linewidths=0.9, label=label, zorder=3, **style)
-    ax.set_xlabel("Precision")
-    ax.set_ylabel("Recall")
-    ax.set_xlim(-0.03, 1.03)
-    ax.set_ylim(-0.03, 1.03)
-    ax.set_xticks([0, 0.25, 0.5, 0.75, 1])
-    ax.set_yticks([0, 0.25, 0.5, 0.75, 1])
-    ax.grid(True, alpha=0.4)
-    ax.set_axisbelow(True)
-    fig.legend(*ax.get_legend_handles_labels(), loc="outside lower center", ncol=1,
-               frameon=False, handletextpad=0.3, labelspacing=0.25)
-    paper_style.save(fig, out_dir, "baseline_localisation")
-    plt.close(fig)
+    _pr_panels(seeds["table3"], points, out_dir, "baseline_localisation", 2.9, 1)
 
 
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--out", required=True, help="figure directory")
-    p.add_argument("--numbers", default=None,
-                   help="numbers.json from full_results.py (default: <out>/../numbers.json)")
+    p.add_argument("--seeds-file", default=None,
+                   help="gin_seeds.json from gin_seed_sweep.py (default: <out>/../gin_seeds.json)")
+    p.add_argument("--skip-examples", action="store_true",
+                   help="only redraw the precision-recall figures (no sampling)")
     p.add_argument("--n", type=int, default=512)
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--device", default="cpu")
     args = p.parse_args()
+
+    paper_style.apply()
+    seeds_path = args.seeds_file or os.path.join(os.path.dirname(os.path.abspath(args.out)),
+                                                 "gin_seeds.json")
+    with open(seeds_path) as f:
+        seeds = json.load(f)["summary"]
+    fidelity_diversity(seeds, args.out)
+    baseline_localisation(seeds, args.out)
+    if args.skip_examples:
+        return
 
     from plugins.feedergan_improved import FeederGANImproved
     from plugins.staged import build_staged
@@ -187,15 +232,8 @@ def main() -> None:
     for name, gen in models.items():
         torch.manual_seed(args.seed)
         sets[name] = gen.sample(args.n)
-
-    paper_style.apply()
     example_feeders(sets, args.out, rows=1)
     example_feeders(sets, args.out, rows=2)
-
-    numbers_path = args.numbers or os.path.join(os.path.dirname(os.path.abspath(args.out)),
-                                                "numbers.json")
-    with open(numbers_path) as f:
-        baseline_localisation(json.load(f), args.out)
 
 
 if __name__ == "__main__":
