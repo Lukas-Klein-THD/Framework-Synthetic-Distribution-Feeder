@@ -232,3 +232,13 @@ def test_realism_score_is_anchored_and_punishes_collapse():
     assert realism_score(0.0, 0.0, 0.98, 0.97) == 0.0                     # untrained
     assert realism_score(0.98, 0.01, 0.97, 0.95) < 0.3                    # precise but collapsed
     assert realism_score(0.47, 0.94, 0.97, 0.95) == pytest.approx(6.53, abs=0.01)
+
+
+def test_physical_and_operational_scores_use_absolute_targets_and_gate():
+    from plugins.distribution.metrics import operational_score, physical_score
+    assert physical_score(1.0, 1.0) == pytest.approx(10.0)
+    assert physical_score(0.653, 0.0) == pytest.approx(3.265)          # mean, not product
+    assert operational_score(1.0, 1.0, 1.0, 1.0) == pytest.approx(10.0)
+    # perfect-looking values on a mostly unfed network must not score well
+    assert operational_score(0.096, 1.0, 0.999, 1.0) < 1.0
+    assert operational_score(1.0, 0.939, 0.976, 0.977) == pytest.approx(9.64, abs=0.01)

@@ -242,6 +242,30 @@ def realism_score(precision: float, recall: float,
     return 0.0 if ref <= 0 else 10.0 * f1(precision, recall) / ref
 
 
+def physical_score(valid_edges: float, valid_feeders: float) -> float:
+    """Physical consistency on a 0-10 scale against the absolute target of 100 %.
+
+    The mean of the phase-valid edge share and the phase-valid feeder share
+    (both fractions).  Real feeders satisfy the phase rule everywhere, so the
+    target and the reference coincide.
+    """
+    return 10.0 * (valid_edges + valid_feeders) / 2.0
+
+
+def operational_score(energised: float, in_band: float, within_rating: float,
+                      unbalance_ok: float) -> float:
+    """Operational performance on a 0-10 scale against absolute targets of 100 %.
+
+    ``10 * E * mean(V, W, U)``, all fractions: energised phases E, energised
+    phases with a voltage inside the evaluation band V (ANSI C84.1 Range A),
+    lines within their rating W, and three-phase buses within the 3 % voltage
+    unbalance limit U.  V, W and U are measured on the energised part only, so
+    they enter through E: a mostly unfed network cannot score well on the
+    voltages and currents of its few energised elements.
+    """
+    return 10.0 * energised * (in_band + within_rating + unbalance_ok) / 3.0
+
+
 # ── tree check ───────────────────────────────────────────────────────────────
 def is_radial_tree(adjacency: np.ndarray) -> bool:
     """Connected, acyclic, single-rooted: one node without a parent, every other

@@ -102,33 +102,53 @@ def pct(x, d=1): return f"{100 * x:.{d}f}"
 ref, stg, mg = E["real (reference)"], E["staged (full)"], E["feedergan-improved"]
 pr_r, pr_s, pr_m = P["50 kW | real"], P["50 kW | staged"], P["50 kW | feedergan-improved"]
 n_pf = 64
-table2 = f"""% ── Table II: physical consistency and operational performance ─────────────
+table2 = f"""% ── Table II: physical consistency ───────────────────────────────────────────
 \\begin{{table}}[t]
 \\centering
-\\caption{{Physical consistency and operational performance of generated
-feeders. Phase-subset rule on every edge and on every segment of a feeder
-($n = {n_main}$); OpenDSS snapshot power flow at 50~kW per node and 1.03~pu
-($n = {n_pf}$), with the voltage band 0.95--1.05~pu evaluated on energized bus
-nodes. Reference values from held-out real feeders. All values in percent.}}
-\\label{{tab:validity}}
+\\caption{{Physical consistency of generated feeders: share of edges and of
+feeders satisfying the phase-subset rule ($n = {n_main}$). Reference values from
+held-out real feeders. All values in percent; the target is 100.}}
+\\label{{tab:physical}}
 \\footnotesize
-\\setlength{{\\tabcolsep}}{{1.8pt}}
-\\begin{{tabular}}{{@{{}}lccccc@{{}}}}
+\\setlength{{\\tabcolsep}}{{4pt}}
+\\begin{{tabular}}{{@{{}}lcc@{{}}}}
 \\toprule
- & \\multicolumn{{2}}{{c}}{{Physical}} & \\multicolumn{{3}}{{c}}{{Operational}} \\\\
-\\cmidrule(lr){{2-3}}\\cmidrule(l){{4-6}}
- & Phase-valid & Phase-valid & Energized & Voltage & Line \\\\
- & edges & feeders & buses & in band & loading \\\\
+ & Phase-valid edges & Phase-valid feeders \\\\
 \\midrule
-Reference feeders  & {pct(ref['phase-subset.edges'])} & {pct(ref['phase-subset.feeders'])} & {pct(pr_r['energised'])} & {pct(pr_r['ansi_a'])} & {pct(pr_r['loading'])} \\\\
+Reference feeders  & {pct(ref['phase-subset.edges'])} & {pct(ref['phase-subset.feeders'])} \\\\
 \\midrule
-Staged             & {pct(stg['phase-subset.edges'])} & {pct(stg['phase-subset.feeders'])} & {pct(pr_s['energised'])} & {pct(pr_s['ansi_a'])} & {pct(pr_s['loading'])} \\\\
-Improved FeederGAN & {pct(mg['phase-subset.edges'])} & {pct(mg['phase-subset.feeders'])} & {pct(pr_m['energised'])} & --$^{{\\dagger}}$ & --$^{{\\dagger}}$ \\\\
+Staged             & {pct(stg['phase-subset.edges'])} & {pct(stg['phase-subset.feeders'])} \\\\
+Improved FeederGAN & {pct(mg['phase-subset.edges'])} & {pct(mg['phase-subset.feeders'])} \\\\
 \\bottomrule
-\\multicolumn{{6}}{{@{{}}p{{\\columnwidth}}@{{}}}}{{\\footnotesize $^{{\\dagger}}$Not
-comparable: with {pct(1 - pr_m['energised'])}\\,\\% of bus nodes de-energized, the remaining
-network carries little load ({pct(pr_m['ansi_a'])}\\,\\% of energized nodes within the band,
-loading {pct(pr_m['loading'])}\\,\\%).}}
+\\end{{tabular}}
+\\end{{table}}
+
+% ── Table III: operational performance ──────────────────────────────────────
+\\begin{{table}}[t]
+\\centering
+\\caption{{Operational performance of generated feeders in an OpenDSS snapshot
+power flow at 50~kW per node and 1.03~pu ($n = {n_pf}$): energized phases;
+energized phases with a voltage inside the band 0.95--1.05~pu derived from ANSI
+C84.1 Range A; lines within their conductor rating; and energized three-phase
+buses with a voltage unbalance of at most 3\\,\\%. Reference values from held-out
+real feeders. All values in percent; the target is 100.}}
+\\label{{tab:operational}}
+\\footnotesize
+\\setlength{{\\tabcolsep}}{{3pt}}
+\\begin{{tabular}}{{@{{}}lcccc@{{}}}}
+\\toprule
+ & Energized & Voltage & Lines within & Unbalance \\\\
+ & phases & in band & rating & within limit \\\\
+\\midrule
+Reference feeders  & {pct(pr_r['energised'])} & {pct(pr_r['ansi_a'])} & {pct(1 - pr_r['overload'])} & {pct(pr_r['unbalance_ok'])} \\\\
+\\midrule
+Staged             & {pct(pr_s['energised'])} & {pct(pr_s['ansi_a'])} & {pct(1 - pr_s['overload'])} & {pct(pr_s['unbalance_ok'])} \\\\
+Improved FeederGAN & {pct(pr_m['energised'])} & {pct(pr_m['ansi_a'])}$^{{\\dagger}}$ & {pct(1 - pr_m['overload'])}$^{{\\dagger}}$ & {pct(pr_m['unbalance_ok'])}$^{{\\dagger}}$ \\\\
+\\bottomrule
+\\multicolumn{{5}}{{@{{}}p{{\\columnwidth}}@{{}}}}{{\\footnotesize $^{{\\dagger}}$Measured on
+the energized part only: with {pct(1 - pr_m['energised'])}\\,\\% of phases de-energized, the
+remaining network carries little load, so these values do not indicate good
+operation.}}
 \\end{{tabular}}
 \\end{{table}}
 """
@@ -142,7 +162,7 @@ n3 = min(256, n_main)
 body3 = "\n".join(
     f"{topo:<11} & {att:<22}\n  & " + " & ".join(cells(t3[key], SK)) + "\n  & "
     + " & ".join(cells(t3[key], AK)) + " \\\\" for topo, att, key in rows3)
-table3 = f"""% ── Table III: error localisation by component swap (n = {n3}) ──────────────
+table3 = f"""% ── Table IV: error localisation by component swap (n = {n3}) ──────────────
 % Alternative to the figure baseline_localisation.pdf; use one of the two.
 % Full text width (table*): mean +- std over five GIN initialisations (gin_seeds.json).
 \\begin{{table*}}[t]
@@ -181,10 +201,64 @@ Topology & Attributes & P $\\uparrow$ & R $\\uparrow$ & FD $\\downarrow$
 
 header = """% Minimal scorecard for the results section (framework as the contribution).
 % Held-out protocol: models trained on the training split; every real set is
-% held out. Generated by make_tables.py from gin_seeds.json and numbers.json.
+% held out. Generated by make_paper_tables.py from gin_seeds.json and numbers.json.
 % Needs \\usepackage{booktabs}. Captions are drafts; reword freely.
 
 """
+# ── Table V: summary scores per dimension (summary_scores.py) ───────────────
+from summary_scores import summary_scores                                  # noqa: E402
+
+SC = summary_scores(S, N)
+json.dump(SC, open(os.path.join(out_dir, "summary_scores.json"), "w"), indent=2)
+
+def plain(x):
+    return f"${x:.1f}$"
+
+def best_of(cells_by_model, values_by_model):
+    best = max(values_by_model, key=values_by_model.get)
+    cells_by_model[best] = bold(cells_by_model[best])
+    return cells_by_model
+
+models4 = ("staged", "feedergan-improved")
+cols4 = {}
+for col, get, fmt in (("realism", lambda s: s["realism"]["mean"], lambda s: score(s["realism"])),
+                      ("physical", lambda s: s["physical"], lambda s: plain(s["physical"])),
+                      ("operational", lambda s: s["operational"], lambda s: plain(s["operational"])),
+                      ("overall", lambda s: s["overall"]["mean"], lambda s: score(s["overall"]))):
+    cols4[col] = best_of({m: fmt(SC[m]) for m in models4}, {m: get(SC[m]) for m in models4})
+row4 = {m: [cols4[c][m] for c in ("realism", "physical", "operational", "overall")] for m in models4}
+real4 = [plain(SC["real"]["realism"]["mean"]), plain(SC["real"]["physical"]),
+         plain(SC["real"]["operational"]), plain(SC["real"]["overall"]["mean"])]
+table4 = f"""% ── Table V: summary scores per evaluation dimension ───────────────────────
+% summary_scores.json (examples/summary_scores.py); realism and overall carry the
+% std over the five GIN seeds, physical and operational are single evaluations.
+\\begin{{table}}[t]
+\\centering
+\\caption{{Summary scores per evaluation dimension (0--10). Realism is the mean
+of the structural and attributed realism scores of Table~\\ref{{tab:realism}},
+relative to real vs.\\ real. Physical: $10 \\cdot$ mean of the phase-valid edge
+and feeder shares (Table~\\ref{{tab:physical}}). Operational: $10 \\cdot E \\cdot$
+mean of voltage in band, lines within rating, and unbalance within limit, where
+$E$ is the share of energized phases (Table~\\ref{{tab:operational}}). Physical
+and operational scores use absolute targets of 100\\,\\%, so real feeders need
+not reach 10. Overall: mean of the three dimensions, weighted equally. Mean
+$\\pm$ standard deviation over five embedding initializations where the
+embedding is involved.}}
+\\label{{tab:summary_scores}}
+\\setlength{{\\tabcolsep}}{{4pt}}
+\\begin{{tabular}}{{@{{}}lcccc@{{}}}}
+\\toprule
+ & Realism & Physical & Operational & Overall \\\\
+\\midrule
+Reference feeders  & {" & ".join(real4)} \\\\
+\\midrule
+Staged             & {" & ".join(row4["staged"])} \\\\
+Improved FeederGAN & {" & ".join(row4["feedergan-improved"])} \\\\
+\\bottomrule
+\\end{{tabular}}
+\\end{{table}}
+"""
+
 open(os.path.join(out_dir, "paper_tables.tex"), "w", encoding="utf-8").write(
-    header + table1 + "\n" + table2 + "\n" + table3)
+    header + table1 + "\n" + table2 + "\n" + table3 + "\n" + table4)
 print("written")

@@ -65,6 +65,13 @@ def add_realism_scores(summary: dict) -> dict:
                     ref[pk]["values"], ref[rk]["values"])]
                 row[key] = {"values": values, "mean": float(np.mean(values)),
                             "std": float(np.std(values, ddof=1)) if len(values) > 1 else 0.0}
+            # combined realism: arithmetic mean of the two families, per seed, so
+            # a failure in one family halves the score instead of erasing it
+            if all(k in row for k in SCORES):
+                values = [float(np.mean(v)) for v in zip(*(row[k]["values"] for k in SCORES))]
+                row["score.realism"] = {
+                    "values": values, "mean": float(np.mean(values)),
+                    "std": float(np.std(values, ddof=1)) if len(values) > 1 else 0.0}
     return summary
 
 
