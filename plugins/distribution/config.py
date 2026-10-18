@@ -22,6 +22,12 @@ DATA_DIR = os.environ.get(
     "GRIDGEN_DATA_DIR",
     os.path.join(_REPO, "..", "paper-implementation", "tensors_v2"))
 
+#: Held-out split by source feeder (train / reference / comparison), shipped with
+#: the framework so every model is trained and scored on the same partition.
+SPLIT_FILE = os.environ.get(
+    "GRIDGEN_SPLIT_FILE",
+    os.path.join(_REPO, "plugins", "distribution", "splits", "heldout_v2.json"))
+
 #: Root for trained weights; each model plugin writes to its own subdirectory.
 CHECKPOINT_ROOT = os.environ.get("GRIDGEN_CHECKPOINT_DIR", os.path.join(_REPO, "checkpoints"))
 

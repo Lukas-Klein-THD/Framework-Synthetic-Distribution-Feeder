@@ -28,6 +28,9 @@ def main() -> None:
     parser.add_argument("--iterations", type=int, default=None,
                         help="override the configured iteration count (for smoke tests)")
     parser.add_argument("--out", default=None, help="checkpoint directory")
+    parser.add_argument("--split", default="train", choices=["train", "all"],
+                        help="train on the training part of the held-out split (default) "
+                             "or on every graph")
     parser.add_argument("--stage", default="all", choices=["all", "topology", "attributes"],
                         help="staged model only: train one stage, keep the other's checkpoint")
     args = parser.parse_args()
@@ -38,7 +41,7 @@ def main() -> None:
         from plugins.staged import config
         from plugins.staged.training import train_attributes, train_topology
 
-        source = TensorFeederSource()
+        source = TensorFeederSource(split=None if args.split == "all" else args.split)
         print(source)
         out = args.out or config.CHECKPOINT_DIR
         topo, attr = config.TopologyConfig(), config.AttributeConfig()
@@ -55,7 +58,8 @@ def main() -> None:
         from plugins.feedergan_improved import config
         from plugins.feedergan_improved.training import train
 
-        source = TensorFeederSource(extras=("distance", "pseudo_load", "level"))
+        source = TensorFeederSource(extras=("distance", "pseudo_load", "level"),
+                                    split=None if args.split == "all" else args.split)
         print(source)
         tc = config.TrainConfig()
         if args.iterations:

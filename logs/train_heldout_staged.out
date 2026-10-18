@@ -1,0 +1,22 @@
+TensorFeederSource(n=1924, M=128, split=train)
+[topology   500] d=-0.1400 g=-0.0939 tau=0.681
+[topology  1000] d=-0.2524 g=-0.0625 tau=0.464
+[topology  1500] d=-0.3670 g=+0.1416 tau=0.316
+[topology  2000] d=-0.5579 g=-0.2909 tau=0.215
+[topology  2500] d=-0.6066 g=-0.1923 tau=0.147
+[topology  3000] d=-0.9275 g=-0.3109 tau=0.100
+FeederProfile(dim=4, pool=1924, mix={})
+[attributes   500] loss=4.0336 length=1.206 ampacity=1.427 phase=1.401
+[attributes  1000] loss=3.9430 length=1.119 ampacity=1.468 phase=1.357
+[attributes  1500] loss=4.0157 length=1.056 ampacity=1.432 phase=1.527
+[attributes  2000] loss=3.2764 length=0.939 ampacity=1.074 phase=1.263
+[attributes  2500] loss=3.3606 length=0.983 ampacity=1.095 phase=1.283
+[attributes  3000] loss=3.5564 length=1.090 ampacity=1.052 phase=1.414
+[attributes  3500] loss=3.2952 length=0.943 ampacity=1.122 phase=1.231
+[attributes  4000] loss=3.2294 length=0.843 ampacity=1.119 phase=1.268
+[attributes  4500] loss=3.2464 length=0.917 ampacity=1.096 phase=1.234
+[attributes  5000] loss=3.5037 length=0.963 ampacity=1.082 phase=1.459
+[attributes  5500] loss=3.1622 length=0.861 ampacity=1.049 phase=1.252
+[attributes  6000] loss=3.1571 length=0.857 ampacity=1.048 phase=1.253
+checkpoints: D:/FeederGAN/framework/checkpoints/heldout\staged/topology.pt, D:/FeederGAN/framework/checkpoints/heldout\staged/attributes.pt
+done in 234.4 min

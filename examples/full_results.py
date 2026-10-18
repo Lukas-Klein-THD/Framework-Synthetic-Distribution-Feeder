@@ -9,17 +9,20 @@ the staged model and the improved FeederGAN (M1+), both trained in this
 framework.  Each section writes ``<out>/logs/<section>.log``; all numbers are
 also collected in ``<out>/numbers.json``.
 
-    topology            structure metrics, untrained baselines, tree shape (n = 512)
+    topology            structure metrics, untrained baselines, tree shape (n = 256)
     attributed          attributed metrics, stage 2 on real topology, per-attribute
-                        distances and persistence (n = 512)
-    electrical          phase subset and ampacity tapering (n = 512)
+                        distances and persistence (n = 256)
+    electrical          phase subset and ampacity tapering (n = 256)
     phase_constraint    unconstrained / repaired / constrained, all PAIRED (n = 256)
     power_flow          OpenDSS at 10 / 50 / 100 kW per node, 1.03 pu (n = 64)
     baselines           trained vs untrained component per stage, profile echo (n = 256)
     categories          per-category attribute quality (original feeders only)
 
-Sections 1-2 use the same pool split, seeds and sampling order as
-``compare.py``, so their numbers are identical to the comparison table.
+Real sets come from the held-out split (``examples/make_split.py``): the
+reference and the real-vs-real set are the two test halves, and the models,
+their profile pool and the attribute encoding use the training part only.
+``--all-data`` reproduces the earlier protocol, where both real sets were drawn
+from every graph (identical to ``compare.py``).
 Power flow uses the custom-approach OpenDSS harness (``--custom-approach``) so
 its columns match the earlier power-flow tables exactly.
 """
@@ -57,6 +60,24 @@ TOPO_KEYS = ("gin.prdc.precision", "gin.prdc.recall", "gin.prdc.coverage",
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────
+def real_sets(n: int, seed: int, heldout: bool = True):
+    """Reference set, real-vs-real set and training feeders.
+
+    Held out (default): the two halves of the test split, which share no source
+    feeder with each other or with training.  Otherwise both sets come from one
+    pool of every graph, as in the earlier all-data protocol.
+    """
+    if heldout:
+        reference = TensorFeederSource(split="reference").sample(n, seed=seed)
+        floor = TensorFeederSource(split="comparison").sample(n, seed=seed)
+        train = TensorFeederSource(split="train")
+    else:
+        train = TensorFeederSource()
+        pool = train.sample(2 * n, seed=seed)
+        reference, floor = pool[:n], pool[n:]
+    return reference, floor, train
+
+
 class Context:
     """Data, models and the shared real sets, built once."""
 
@@ -66,10 +87,13 @@ class Context:
         from plugins.staged.attributes import MDNAttributes
 
         self.args, self.n, self.seed, self.device = args, args.n, args.seed, args.device
-        self.source = TensorFeederSource()
-        pool = self.source.sample(2 * self.n, seed=self.seed)
-        self.reference, self.floor = pool[:self.n], pool[self.n:]
-        self.encoder = AttributeEncoder.fit(self.reference)
+        self.heldout = not getattr(args, "all_data", False)
+        self.reference, self.floor, self.train = real_sets(self.n, self.seed, self.heldout)
+        # encoding fitted on training data under the held-out protocol, so the
+        # test sets play no part in defining the metric
+        self.encoder = AttributeEncoder.fit(list(self.train) if self.heldout else self.reference)
+        #: real marginals the independent-attribute control may use
+        self.marginals = list(self.train) if self.heldout else self.reference
         staged_dir = os.path.join(shared.CHECKPOINT_ROOT, "staged")
         topo, attr = (os.path.join(staged_dir, "topology.pt"),
                       os.path.join(staged_dir, "attributes.pt"))
@@ -381,6 +405,7 @@ def _echo(ctx, adjacencies, real, seed):
 def baselines(ctx, n=256):
     n = min(n, ctx.n)
     reference, floor = ctx.reference[:n], ctx.floor[:n]
+    marginals = ctx.marginals if ctx.heldout else reference
     metrics = attributed_metrics(ctx.encoder, seed=ctx.seed)
     torch.manual_seed(ctx.seed)
     gan = ctx.staged.topology.sample_topology(n)
@@ -388,9 +413,9 @@ def baselines(ctx, n=256):
     sets = {
         "real (floor)": floor,
         "GAN + MDN (staged)": with_attributes(gan, generate_attributes(ctx.mdn, gan, seed=ctx.seed)),
-        "GAN + i.i.d. echo": with_attributes(gan, _echo(ctx, gan, reference, ctx.seed)),
+        "GAN + i.i.d. echo": with_attributes(gan, _echo(ctx, gan, marginals, ctx.seed)),
         "random tree + MDN": with_attributes(rnd, generate_attributes(ctx.mdn, rnd, seed=ctx.seed)),
-        "random tree + echo": with_attributes(rnd, _echo(ctx, rnd, reference, ctx.seed)),
+        "random tree + echo": with_attributes(rnd, _echo(ctx, rnd, marginals, ctx.seed)),
         "feedergan-improved": ctx.samples("feedergan-improved")[:n],
     }
     rows = {}
@@ -416,16 +441,23 @@ def categories(ctx, per_category=114):
     """Attribute quality per category on original feeders, as evaluate_by_category.py."""
     from plugins.staged.profile import FeederProfile, compute_raw
 
-    originals = TensorFeederSource(include_decomposed=False, labeler=SourcePathLabeler())
-    feeders = [originals[i] for i in range(len(originals))]
+    # held out: profiles are drawn from training feeders, quality is measured on
+    # held-out feeders of the same category
+    def originals(split):
+        src = TensorFeederSource(include_decomposed=False, labeler=SourcePathLabeler(),
+                                 split=split)
+        return [src[i] for i in range(len(src))]
+
+    feeders = originals("train" if ctx.heldout else None)
+    evaluated = originals("test") if ctx.heldout else feeders
     by_cat: dict[str, list[Feeder]] = {}
-    for f in feeders:
+    for f in evaluated:
         by_cat.setdefault(f.category, []).append(f)
-    print({c: len(v) for c, v in sorted(by_cat.items(), key=lambda kv: str(kv[0]))})
+    print("evaluated:", {c: len(v) for c, v in sorted(by_cat.items(), key=lambda kv: str(kv[0]))})
 
     # the trained profile pool carries no labels; rebuild it from the labelled
-    # originals with the TRAINING standardisation, which leaves the model's
-    # conditioning space unchanged
+    # (training) originals with the TRAINING standardisation, which leaves the
+    # model's conditioning space unchanged
     base = ctx.mdn.profile
     raw = np.stack([compute_raw(f.attributes) for f in feeders])
     mean, std = base.mean.cpu(), base.std.cpu()
@@ -506,7 +538,10 @@ def main() -> None:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--out", required=True)
     p.add_argument("--sections", nargs="+", default=list(SECTIONS), choices=list(SECTIONS))
-    p.add_argument("--n", type=int, default=512)
+    p.add_argument("--n", type=int, default=256,
+                   help="feeders per set (the held-out halves hold about 330 each)")
+    p.add_argument("--all-data", action="store_true",
+                   help="earlier protocol: real sets drawn from every graph, n up to 512")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--device", default="cpu")
     p.add_argument("--custom-approach", default=os.path.join(REPO, "..", "custom-approach"))

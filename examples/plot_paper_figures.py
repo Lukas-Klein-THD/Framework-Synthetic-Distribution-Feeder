@@ -35,7 +35,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import paper_style                                                         # noqa: E402
-from plugins.distribution import PhaseSubset, TensorFeederSource           # noqa: E402
+from plugins.distribution import PhaseSubset                                # noqa: E402
 from plugins.distribution import config as shared                          # noqa: E402
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -200,7 +200,9 @@ def main() -> None:
                    help="gin_seeds.json from gin_seed_sweep.py (default: <out>/../gin_seeds.json)")
     p.add_argument("--skip-examples", action="store_true",
                    help="only redraw the precision-recall figures (no sampling)")
-    p.add_argument("--n", type=int, default=512)
+    p.add_argument("--n", type=int, default=256)
+    p.add_argument("--all-data", action="store_true",
+                   help="earlier protocol: real feeders drawn from every graph")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--device", default="cpu")
     args = p.parse_args()
@@ -218,8 +220,9 @@ def main() -> None:
     from plugins.feedergan_improved import FeederGANImproved
     from plugins.staged import build_staged
 
-    # the scored sets: same pool split, seeds and order as compare.py / full_results.py
-    pool = TensorFeederSource().sample(2 * args.n, seed=args.seed)
+    # the scored sets: same real sets, seeds and order as full_results.py
+    from full_results import real_sets
+    _, floor, _ = real_sets(args.n, args.seed, heldout=not args.all_data)
     staged_dir = os.path.join(shared.CHECKPOINT_ROOT, "staged")
     models = {
         "staged": build_staged(os.path.join(staged_dir, "topology.pt"),
@@ -228,12 +231,14 @@ def main() -> None:
             os.path.join(shared.CHECKPOINT_ROOT, "feedergan_improved",
                          "feedergan_improved_final.pt"), device=args.device),
     }
-    sets = {"real (floor)": pool[args.n:]}
+    sets = {"real (floor)": floor}
     for name, gen in models.items():
         torch.manual_seed(args.seed)
         sets[name] = gen.sample(args.n)
     example_feeders(sets, args.out, rows=1)
     example_feeders(sets, args.out, rows=2)
+    from plot_comparison import distributions        # same sets as every table
+    distributions(sets, args.out)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,16 @@
+TensorFeederSource(n=1924, M=128, split=train)
+encoded 1924 real graphs
+D:\FeederGAN\paper-implementation\venv\Lib\site-packages\torch\autograd\graph.py:882: UserWarning: Attempting to run cuBLAS, but there was no current CUDA context! Attempting to set the primary context... (Triggered internally at C:\actions-runner\_work\pytorch\pytorch\aten\src\ATen\cuda\CublasHandlePool.cpp:370.)
+  return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
+step   500  W +4.537  GP 0.010
+step  1000  W +2.243  GP 0.071
+step  1500  W +2.215  GP 0.082
+step  2000  W +2.120  GP 0.001
+step  2500  W +2.012  GP 0.001
+step  3000  W +2.015  GP 0.034
+step  3500  W +2.128  GP 0.024
+step  4000  W +2.153  GP 0.005
+step  4500  W +2.242  GP 0.081
+step  5000  W +2.281  GP 0.005
+checkpoint: D:/FeederGAN/framework/checkpoints/heldout\feedergan_improved\feedergan_improved_final.pt
+done in 6.9 min

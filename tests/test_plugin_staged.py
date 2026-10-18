@@ -181,3 +181,18 @@ def test_attribute_classes_cover_every_training_feeder(tmp_path):
                                 on_log=lambda *_: None)
     assert 170.0 in model.heads["ampacity"].values.tolist()
     assert 3.0 in model.heads["phase"].values.tolist()
+
+
+def test_heldout_split_keeps_each_source_feeder_in_one_part():
+    """The split is by source feeder: a feeder and its subfeeders share one part."""
+    from plugins.distribution.data import load_split
+    try:
+        split = load_split()
+    except FileNotFoundError as exc:
+        pytest.skip(f"split file unavailable: {exc}")
+    parts = split["parts"]
+    assert set(parts.values()) <= {"train", "reference", "comparison"}
+    counts = {p: sum(1 for v in parts.values() if v == p) for p in set(parts.values())}
+    assert counts == {p: c["feeders"] for p, c in split["counts"].items()}
+    test_share = (counts["reference"] + counts["comparison"]) / len(parts)
+    assert abs(test_share - split["test_fraction"]) < 0.02

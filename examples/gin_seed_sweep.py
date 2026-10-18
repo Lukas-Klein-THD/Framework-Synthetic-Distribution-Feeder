@@ -5,7 +5,7 @@ Embedding metrics over several random GIN initialisations.
 
 The random-GIN embedding is untrained, so its initialisation is a source of
 variance (Thompson et al., 2022).  This script draws the feeder sets of Tables I
-and III exactly as ``full_results.py`` does (same pool split, sampling seeds and
+and III exactly as ``full_results.py`` does (same real sets, sampling seeds and
 order), keeps them fixed, and scores them under each GIN seed.  Only the
 embedding changes between seeds, so seed 0 reproduces the published numbers.
 
@@ -29,6 +29,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from gridgen.core.feeder import Feeder                                     # noqa: E402
 from plugins.distribution import attributed_metrics, structural_metrics    # noqa: E402
+from plugins.distribution.metrics import realism_score                    # noqa: E402
 from plugins.distribution import config as shared                          # noqa: E402
 from full_results import (                                                 # noqa: E402
     Context, _Tee, _echo, evaluate, generate_attributes, random_trees, with_attributes)
@@ -36,6 +37,35 @@ from full_results import (                                                 # noq
 STRUCT = ("gin.prdc.precision", "gin.prdc.recall", "gin.fid.value")
 ATTR = ("gin-attributed.prdc.precision", "gin-attributed.prdc.recall",
         "gin-attributed.fid.value")
+
+
+#: realism score per metric family: (precision key, recall key) -> score key
+SCORES = {"score.structure": ("gin.prdc.precision", "gin.prdc.recall"),
+          "score.attributes": ("gin-attributed.prdc.precision", "gin-attributed.prdc.recall")}
+
+
+def add_realism_scores(summary: dict) -> dict:
+    """Add the 0-10 realism score to every row, computed per embedding seed.
+
+    Each seed's score is taken against that seed's real-vs-real row, then
+    averaged, so the score carries the same mean +- std as the other metrics.
+    Works on a loaded ``gin_seeds.json`` summary as well; existing scores are
+    recomputed.
+    """
+    for rows in summary.values():
+        ref = rows.get("real vs real")
+        if ref is None:
+            continue
+        for row in rows.values():
+            for key, (pk, rk) in SCORES.items():
+                if pk not in row or pk not in ref:
+                    continue
+                values = [realism_score(p, r, rp, rr) for p, r, rp, rr in zip(
+                    row[pk]["values"], row[rk]["values"],
+                    ref[pk]["values"], ref[rk]["values"])]
+                row[key] = {"values": values, "mean": float(np.mean(values)),
+                            "std": float(np.std(values, ddof=1)) if len(values) > 1 else 0.0}
+    return summary
 
 
 def table_sets(ctx):
@@ -49,15 +79,16 @@ def table_sets(ctx):
     }
     n3 = min(256, ctx.n)
     reference3 = ctx.reference[:n3]
+    marginals = ctx.marginals if ctx.heldout else reference3
     torch.manual_seed(ctx.seed)
     gan = ctx.staged.topology.sample_topology(n3)
     rnd = random_trees(n3, m, "uniform", ctx.seed)
     table3 = {
         "real vs real": ctx.floor[:n3],
         "GAN + MDN (staged)": with_attributes(gan, generate_attributes(ctx.mdn, gan, seed=ctx.seed)),
-        "GAN + i.i.d. echo": with_attributes(gan, _echo(ctx, gan, reference3, ctx.seed)),
+        "GAN + i.i.d. echo": with_attributes(gan, _echo(ctx, gan, marginals, ctx.seed)),
         "random tree + MDN": with_attributes(rnd, generate_attributes(ctx.mdn, rnd, seed=ctx.seed)),
-        "random tree + echo": with_attributes(rnd, _echo(ctx, rnd, reference3, ctx.seed)),
+        "random tree + echo": with_attributes(rnd, _echo(ctx, rnd, marginals, ctx.seed)),
         "feedergan-improved": ctx.samples("feedergan-improved")[:n3],
     }
     return table1, (reference3, table3)
@@ -67,7 +98,9 @@ def main() -> None:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--out", required=True)
     p.add_argument("--seeds", type=int, nargs="+", default=[0, 1, 2, 3, 4])
-    p.add_argument("--n", type=int, default=512)
+    p.add_argument("--n", type=int, default=256)
+    p.add_argument("--all-data", action="store_true",
+                   help="earlier protocol: real sets drawn from every graph")
     p.add_argument("--seed", type=int, default=0, help="sampling seed (fixed)")
     p.add_argument("--device", default="cpu")
     args = p.parse_args()
@@ -107,6 +140,7 @@ def main() -> None:
                               for k, v in row.items()}
                        for name, row in rows.items()}
                    for t, rows in per_seed.items()}
+        add_realism_scores(summary)
         print(f"\n=== mean +- std over GIN seeds {args.seeds} ===")
         for t, rows in summary.items():
             print(f"\n{t}")

@@ -77,9 +77,17 @@ class TensorFeederSource(DataSource):
         (downstream transformer kVA, over the full feeder) and ``"level"``
         (FeederGAN level class).  They are not part of the schema; evaluation
         uses only the organic attributes.
+    split:
+        Restrict to one part of the held-out split (see :func:`make_split`):
+        ``"train"``, ``"test"``, or one of its two halves ``"reference"`` and
+        ``"comparison"``.  ``None`` uses every graph.
+    split_file:
+        The split to use; defaults to :data:`config.SPLIT_FILE`.
     """
 
     EXTRAS = ("distance", "pseudo_load", "level")
+    SPLITS = {"train": ("train",), "test": ("reference", "comparison"),
+              "reference": ("reference",), "comparison": ("comparison",)}
 
     def __init__(self, directory: str | None = None,
                  num_nodes: int = config.NUM_NODES,
@@ -87,7 +95,9 @@ class TensorFeederSource(DataSource):
                  labeler: "CategoryLabeler | None" = None,
                  max_graphs: int | None = None,
                  cache: bool = True,
-                 extras: Sequence[str] = ()):
+                 extras: Sequence[str] = (),
+                 split: str | None = None,
+                 split_file: str | None = None):
         unknown = set(extras) - set(self.EXTRAS)
         if unknown:
             raise ValueError(f"unknown extras {sorted(unknown)}; choose from {self.EXTRAS}")
@@ -107,6 +117,17 @@ class TensorFeederSource(DataSource):
                 continue
             paths.extend(os.path.join(root, f) for f in files if f.endswith(".pt"))
         self._paths = [p for p in sorted(paths) if self._size(p) >= num_nodes]
+        self.split = split
+        if split is not None:
+            if split not in self.SPLITS:
+                raise ValueError(f"unknown split {split!r}; choose from {sorted(self.SPLITS)}")
+            parts = load_split(split_file)["parts"]
+            keep = self.SPLITS[split]
+            missing = {self._source(p) for p in self._paths} - set(parts)
+            if missing:
+                raise RuntimeError(f"{len(missing)} source feeders are not in the split file; "
+                                   "rebuild it with examples/make_split.py")
+            self._paths = [p for p in self._paths if parts[self._source(p)] in keep]
         if max_graphs:
             self._paths = self._paths[:max_graphs]
         if not self._paths:
@@ -150,19 +171,82 @@ class TensorFeederSource(DataSource):
                         {"source": meta.get("source_file"), "path": self._paths[index]})
         return self.labeler.apply(feeder) if self.labeler else feeder
 
-    # ── size cache ───────────────────────────────────────────────────────────
+    # ── header cache: size and source feeder, read once per file ─────────────
     @staticmethod
     @lru_cache(maxsize=None)
-    def _size(path: str) -> int:
+    def _header(path: str) -> tuple[int, str]:
         import torch
         try:
             blob = torch.load(path, map_location="cpu", weights_only=False)
-            return int(blob["tensors"]["A_raw"].shape[0])
+            return (int(blob["tensors"]["A_raw"].shape[0]),
+                    str(blob["meta"].get("source_file", path)))
         except Exception:
-            return -1
+            return -1, path
+
+    @classmethod
+    def _size(cls, path: str) -> int:
+        return cls._header(path)[0]
+
+    @classmethod
+    def _source(cls, path: str) -> str:
+        """The feeder model a graph comes from; a subfeeder shares its parent's."""
+        return cls._header(path)[1]
 
     def __repr__(self) -> str:
-        return f"TensorFeederSource(n={len(self)}, M={self.num_nodes})"
+        split = f", split={self.split}" if self.split else ""
+        return f"TensorFeederSource(n={len(self)}, M={self.num_nodes}{split})"
+
+
+# ── held-out split ───────────────────────────────────────────────────────────
+def make_split(directory: str | None = None, num_nodes: int = config.NUM_NODES,
+               test_fraction: float = 0.25, seed: int = 0) -> dict:
+    """Assign every source feeder to ``train``, ``reference`` or ``comparison``.
+
+    The unit is the *source feeder*: a feeder and all subfeeders sampled from it
+    share one part, so no segment appears on both sides of any boundary.  Within
+    each category, ``test_fraction`` of the feeders are held out and alternately
+    assigned to the two test halves: ``reference`` (the set generated feeders are
+    scored against) and ``comparison`` (the independent real sample of the
+    real-vs-real row).  Only feeders contributing a graph of at least
+    ``num_nodes`` nodes are assigned.
+    """
+    source = TensorFeederSource(directory, num_nodes=num_nodes, cache=False)
+    labeler = SourcePathLabeler()
+    graphs: dict[str, int] = {}
+    for p in source._paths:
+        graphs[source._source(p)] = graphs.get(source._source(p), 0) + 1
+    by_category: dict[str, list[str]] = {}
+    for src in sorted(graphs):
+        cat = labeler.label(Feeder(np.zeros((1, 1)), {}, {"source": src})) or "unlabelled"
+        by_category.setdefault(cat, []).append(src)
+
+    rng = np.random.default_rng(seed)
+    parts: dict[str, str] = {}
+    for cat in sorted(by_category):
+        sources = list(by_category[cat])
+        rng.shuffle(sources)
+        n_test = int(round(test_fraction * len(sources)))
+        for i, src in enumerate(sources):
+            parts[src] = ("reference" if i % 2 == 0 else "comparison") if i < n_test else "train"
+
+    counts: dict[str, dict[str, int]] = {}
+    for src, part in parts.items():
+        c = counts.setdefault(part, {"feeders": 0, "graphs": 0})
+        c["feeders"] += 1
+        c["graphs"] += graphs[src]
+    return {"version": 1, "data": os.path.basename(source.directory), "num_nodes": num_nodes,
+            "test_fraction": test_fraction, "seed": seed, "unit": "source feeder",
+            "counts": counts, "parts": parts}
+
+
+def load_split(path: str | None = None) -> dict:
+    import json
+    path = path or config.SPLIT_FILE
+    if not os.path.isfile(path):
+        raise FileNotFoundError(f"split file not found: {path}; create it with "
+                                "examples/make_split.py")
+    with open(path) as f:
+        return json.load(f)
 
 
 @register("category_labeler", "source-path")

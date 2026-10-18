@@ -225,6 +225,23 @@ class PrecisionRecallDensityCoverage(Distance):
         return d[:, min(self.k, d.shape[1] - 1)]
 
 
+# ── summary score ────────────────────────────────────────────────────────────
+def realism_score(precision: float, recall: float,
+                  ref_precision: float, ref_recall: float) -> float:
+    """Realism on a 0-10 scale: F1 of precision and recall, relative to real vs real.
+
+    The harmonic mean drops to zero when either term does, so high precision
+    cannot hide a collapse in recall.  Dividing by the real-vs-real F1 measured
+    with the same embedding and sample size anchors the scale: 10 is what an
+    independent real sample reaches, 0 is an untrained model.  FD is left out
+    on purpose, because its scale depends on the embedding initialisation.
+    """
+    def f1(p, r):
+        return 0.0 if p + r <= 0 else 2.0 * p * r / (p + r)
+    ref = f1(ref_precision, ref_recall)
+    return 0.0 if ref <= 0 else 10.0 * f1(precision, recall) / ref
+
+
 # ── tree check ───────────────────────────────────────────────────────────────
 def is_radial_tree(adjacency: np.ndarray) -> bool:
     """Connected, acyclic, single-rooted: one node without a parent, every other

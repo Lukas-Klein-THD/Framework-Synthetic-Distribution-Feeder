@@ -1,0 +1,116 @@
+=== topology ===
+structure metrics, reference = 256 real feeders
+
+set                              prdc       prdc       prdc       prdc     degree   spectrum        gin
+real (floor)                   0.9805     0.9688     0.9805      1.009   0.007355   0.007818     0.6057
+staged                         0.9961     0.8711     0.6016      1.105     0.2445    0.03152      65.25
+feedergan-improved             0.9609     0.9141     0.8047     0.8289    0.06272   0.009932      55.38
+uniform random tree                 0          0          0          0      1.343      0.289       7111
+preferential attachment             0          0          0          0      1.547      1.077  2.702e+05
+
+tree shape (mean per feeder)
+set                             leaf_share branching_share  max_out_degree       max_depth        diameter
+real (reference)                    0.2694          0.2186           3.434           21.88           32.62
+real (floor)                        0.2718          0.2181           3.473           22.44           33.34
+staged                              0.2318          0.1977           3.238              22           35.25
+feedergan-improved                  0.2872          0.2122           4.625           22.25           37.34
+uniform random tree                 0.5022          0.2499           7.234           8.945           15.34
+preferential attachment             0.6639          0.1702           22.55           6.344           11.01
+=== attributed ===
+attributed metrics, reference = 256 real feeders
+
+set                                precision    recall  coverage   density       FID
+real (floor)                          0.9727    0.9492    0.9688     1.055      16.6
+staged (full)                         0.4688    0.9492    0.5234    0.2336     213.7
+staged stage 2 on real topology       0.4336    0.8828    0.4648    0.2102     220.6
+feedergan-improved                         1  0.007812    0.1367    0.6258     463.9
+
+per-attribute distance to the reference (all nodes) and persistence (share of edges where the child keeps the parent's value)
+
+set                                length W1 km   amp TV  phase TV amp persist phase persist
+real (reference)                         0.0000    0.000     0.000       0.766         0.855
+real (floor)                             0.0057    0.038     0.023       0.765         0.854
+staged (full)                            0.0042    0.171     0.142       0.826         0.900
+staged stage 2 on real topology          0.0061    0.174     0.171       0.812         0.895
+feedergan-improved                       0.0342    0.200     0.033       0.501         0.610
+=== electrical ===
+set                         phase edges  phase feeders  taper edges  taper feeders
+real (reference)                 1.0000         1.0000       0.9595         0.0898
+staged, real topology            0.9983         0.8281       0.9583         0.0352
+staged (full)                    0.9989         0.8672       0.9602         0.0234
+feedergan-improved               0.6528         0.0000       0.7369         0.0000
+staged (full): 37 violating edges, 0 of them below the root
+feedergan-improved: 11288 violating edges, 394 of them below the root
+=== phase_constraint ===
+seed  arm                                 edge ok  feeder ok  phase TV  attr FID  precision   recall
+0     staged, unconstrained                0.9987     0.8633    0.1364     175.3     0.4883   0.9297
+0     staged, repaired post hoc            1.0000     1.0000    0.1359     177.3     0.4883   0.9297
+0     staged, constrained sampling         1.0000     1.0000    0.1365     177.6     0.4922   0.9297
+0     feedergan-improved, unconstrained    0.6528     0.0000    0.0325     463.9     1.0000   0.0078
+0     feedergan-improved, repaired post hoc   1.0000     1.0000    0.5256    1331.6     0.0039   0.2500
+      constrained vs unconstrained: 0.0037 of phase values differ
+1     staged, unconstrained                0.9993     0.9219    0.1349     194.9     0.4492   0.9141
+1     staged, repaired post hoc            1.0000     1.0000    0.1349     195.0     0.4492   0.9141
+1     staged, constrained sampling         1.0000     1.0000    0.1349     195.1     0.4492   0.9141
+1     feedergan-improved, unconstrained    0.6607     0.0000    0.0411     446.4     0.9961   0.0078
+1     feedergan-improved, repaired post hoc   1.0000     1.0000    0.5571    1367.3     0.0156   0.3906
+      constrained vs unconstrained: 0.0009 of phase values differ
+=== power_flow ===
+OpenDSS, 64 feeders per arm, source 1.03 pu, same load on every node
+
+ kW/node                                 arm energised    Vmin  ANSI-A  ANSI-B  unbal%  unb<=3%  loading  overload
+      10                                real     1.000  1.0221   1.000   1.000    0.11    1.000    0.039     0.000
+      10                              staged     0.998  1.0226   1.000   1.000    0.10    1.000    0.057     0.001
+      10               staged + phase repair     1.000  1.0226   1.000   1.000    0.10    1.000    0.057     0.001
+      10                  feedergan-improved     0.096  1.0295   1.000   1.000    0.00    1.000    0.003     0.000
+      10   feedergan-improved + phase repair     1.000  1.0205   1.000   1.000    0.07    1.000    0.075     0.006
+
+      50                                real     1.000  0.9912   0.939   0.972    0.54    0.977    0.196     0.024
+      50                              staged     0.998  0.9925   0.954   0.976    0.54    0.975    0.287     0.066
+      50               staged + phase repair     1.000  0.9924   0.954   0.976    0.54    0.975    0.288     0.067
+      50                  feedergan-improved     0.096  1.0273   1.000   1.000    0.02    1.000    0.015     0.001
+      50   feedergan-improved + phase repair     1.000  0.9809   0.997   1.000    0.34    1.000    0.386     0.103
+
+     100                                real     1.000  0.9568   0.818   0.879    1.01    0.916    0.388     0.102
+     100                              staged     0.998  0.9570   0.865   0.922    1.07    0.925    0.577     0.160
+     100               staged + phase repair     1.000  0.9569   0.864   0.921    1.07    0.924    0.579     0.160
+     100                  feedergan-improved     0.096  1.0246   1.000   1.000    0.04    1.000    0.030     0.005
+     100   feedergan-improved + phase repair     1.000  0.9307   0.725   0.927    0.70    1.000    0.785     0.190
+
+a low 'energised' fraction flatters every voltage column: de-energised buses carry no load
+=== baselines ===
+set                        precision    recall  coverage       FID amp persist phase feeders
+real (floor)                  0.9727    0.9492    0.9688      16.6       0.765         1.000
+GAN + MDN (staged)            0.4219    0.9453    0.4766     199.1       0.826         0.879
+GAN + i.i.d. echo             0.7617    0.0391    0.2695     206.7       0.244         0.000
+random tree + MDN             0.3203    0.5117    0.2031     467.7       0.673         0.793
+random tree + echo            0.2812    0.0117    0.1328     234.3       0.242         0.000
+feedergan-improved            1.0000    0.0078    0.1367     463.9       0.501         0.000
+real (reference)                                                         0.766         1.000
+=== categories ===
+evaluated: {'industrial': 1, 'rural': 24, 'urban-suburban': 382}
+
+category            n  arm                                length W1  amp TV phase TV 3ph share mean len
+industrial          1  staged, bootstrapped profile           0.036   0.617    0.711     0.133   0.0695
+industrial          1  staged, stratified profile             0.019   0.648    0.094     0.750   0.1051
+industrial          1  staged, stratified, generated topology     0.024   0.445    0.156     0.875   0.1088
+industrial          1  staged, true profile                   0.026   0.680    0.047     0.711   0.0721
+industrial          1  feedergan-improved (unconditional)     0.036   0.367    0.250     0.469   0.1073
+                       REAL industrial                                                   0.719   0.0971
+
+rural              24  staged, bootstrapped profile           0.154   0.329    0.209     0.273   0.1037
+rural              24  staged, stratified profile             0.028   0.250    0.167     0.315   0.2465
+rural              24  staged, stratified, generated topology     0.028   0.305    0.119     0.385   0.2329
+rural              24  staged, true profile                   0.033   0.258    0.177     0.305   0.2280
+rural              24  feedergan-improved (unconditional)     0.154   0.396    0.027     0.477   0.1032
+                       REAL rural                                                        0.482   0.2586
+
+urban-suburban    114  staged, bootstrapped profile           0.004   0.182    0.165     0.318   0.0929
+urban-suburban    114  staged, stratified profile             0.006   0.147    0.130     0.375   0.0931
+urban-suburban    114  staged, stratified, generated topology     0.007   0.104    0.107     0.383   0.0895
+urban-suburban    114  staged, true profile                   0.005   0.136    0.140     0.352   0.0917
+urban-suburban    114  feedergan-improved (unconditional)     0.032   0.198    0.024     0.478   0.1051
+                       REAL urban-suburban                                               0.483   0.0967
+
+distances are to that category's own real feeders (lower is better)
+written to ../custom-approach/results/2026-10-14_heldout_results

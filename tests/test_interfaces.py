@@ -224,3 +224,11 @@ def test_registry_roundtrip_and_errors():
         register("generator", "dummy-mono")(Monolithic)
     with pytest.raises(KeyError, match="no generator registered"):
         build("generator", "nope")
+
+
+def test_realism_score_is_anchored_and_punishes_collapse():
+    from plugins.distribution.metrics import realism_score
+    assert realism_score(0.98, 0.97, 0.98, 0.97) == pytest.approx(10.0)   # real reference
+    assert realism_score(0.0, 0.0, 0.98, 0.97) == 0.0                     # untrained
+    assert realism_score(0.98, 0.01, 0.97, 0.95) < 0.3                    # precise but collapsed
+    assert realism_score(0.47, 0.94, 0.97, 0.95) == pytest.approx(6.53, abs=0.01)
