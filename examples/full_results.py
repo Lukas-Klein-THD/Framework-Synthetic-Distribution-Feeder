@@ -282,14 +282,18 @@ def electrical(ctx):
     sets = {"real (reference)": ctx.reference,
             "staged, real topology": isolated,
             "staged (full)": ctx.samples("staged"),
-            "feedergan-improved": ctx.samples("feedergan-improved")}
+            "feedergan-improved": ctx.samples("feedergan-improved"),
+            # post-hoc phase repair of the same feeders: valid by construction,
+            # reported separately from the raw generator output
+            "staged + phase repair": repair(ctx.samples("staged")),
+            "feedergan-improved + phase repair": repair(ctx.samples("feedergan-improved"))}
     rows = {}
-    print(f"{'set':<26}{'phase edges':>13}{'phase feeders':>15}"
+    print(f"{'set':<36}{'phase edges':>13}{'phase feeders':>15}"
           f"{'taper edges':>13}{'taper feeders':>15}")
     for name, feeders in sets.items():
         v = validity(feeders)
         rows[name] = v
-        print(f"{name:<26}{v['phase-subset.edges']:>13.4f}{v['phase-subset.feeders']:>15.4f}"
+        print(f"{name:<36}{v['phase-subset.edges']:>13.4f}{v['phase-subset.feeders']:>15.4f}"
               f"{v['ampacity-tapering.edges']:>13.4f}{v['ampacity-tapering.feeders']:>15.4f}")
     # where the phase violations sit
     for name in ("staged (full)", "feedergan-improved"):

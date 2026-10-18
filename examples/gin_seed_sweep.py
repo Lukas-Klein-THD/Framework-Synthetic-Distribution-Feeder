@@ -32,7 +32,7 @@ from plugins.distribution import attributed_metrics, structural_metrics    # noq
 from plugins.distribution.metrics import realism_score                    # noqa: E402
 from plugins.distribution import config as shared                          # noqa: E402
 from full_results import (                                                 # noqa: E402
-    Context, _Tee, _echo, evaluate, generate_attributes, random_trees, with_attributes)
+    Context, _Tee, _echo, evaluate, generate_attributes, random_trees, repair, with_attributes)
 
 STRUCT = ("gin.prdc.precision", "gin.prdc.recall", "gin.fid.value")
 ATTR = ("gin-attributed.prdc.precision", "gin-attributed.prdc.recall",
@@ -83,6 +83,9 @@ def table_sets(ctx):
         "staged": ctx.samples("staged"),
         "feedergan-improved": ctx.samples("feedergan-improved"),
         "uniform random tree": [Feeder(a) for a in random_trees(ctx.n, m, "uniform", ctx.seed)],
+        # the same feeders after post-hoc phase repair (topology unchanged)
+        "staged + phase repair": repair(ctx.samples("staged")),
+        "feedergan-improved + phase repair": repair(ctx.samples("feedergan-improved")),
     }
     n3 = min(256, ctx.n)
     reference3 = ctx.reference[:n3]
@@ -131,7 +134,7 @@ def main() -> None:
                 row = per_seed["table1"].setdefault(name, {})
                 for k in keys:
                     row.setdefault(k, []).append(s[k])
-                print(f"table1 {name:<22}" + "".join(f"{s[k]:>10.4g}" for k in keys))
+                print(f"table1 {name:<34}" + "".join(f"{s[k]:>10.4g}" for k in keys))
             # each stage is read off its own metric family: structure for the
             # topology stage, attributes for the attribute stage
             m3 = structural_metrics(seed=gin_seed) + attributed_metrics(ctx.encoder, seed=gin_seed)

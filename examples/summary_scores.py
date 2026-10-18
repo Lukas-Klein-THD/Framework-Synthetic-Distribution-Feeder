@@ -43,6 +43,13 @@ ROWS = {
     "real": ("real vs real", "real (reference)", "real"),
     "staged": ("staged", "staged (full)", "staged"),
     "feedergan-improved": ("feedergan-improved", "feedergan-improved", "feedergan-improved"),
+    # post-hoc phase repair: valid by construction, so physical and operational
+    # scores describe the repair as much as the generator
+    "staged + phase repair": ("staged + phase repair", "staged + phase repair",
+                              "staged + phase repair"),
+    "feedergan-improved + phase repair": ("feedergan-improved + phase repair",
+                                          "feedergan-improved + phase repair",
+                                          "feedergan-improved + phase repair"),
 }
 
 
@@ -86,10 +93,10 @@ def main() -> None:
     scores = summary_scores(seeds["summary"], numbers)
     with open(os.path.join(folder, "summary_scores.json"), "w") as f:
         json.dump(scores, f, indent=2)
-    print(f"{'':<20}{'structure':>11}{'attributes':>12}{'realism':>13}{'physical':>10}"
+    print(f"{'':<36}{'structure':>11}{'attributes':>12}{'realism':>13}{'physical':>10}"
           f"{'operational':>13}{'overall':>13}")
     for label, s in scores.items():
-        print(f"{label:<20}{s['realism.structure']['mean']:>11.2f}"
+        print(f"{label:<36}{s['realism.structure']['mean']:>11.2f}"
               f"{s['realism.attributes']['mean']:>12.2f}"
               f"{s['realism']['mean']:>8.2f}+-{s['realism']['std']:.2f}"
               f"{s['physical']:>10.2f}{s['operational']:>13.2f}"

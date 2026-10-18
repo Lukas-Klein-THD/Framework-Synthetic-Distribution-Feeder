@@ -1,8 +1,10 @@
 --- GIN seed 0 ---
-table1 real vs real              0.9805    0.9688    0.6057    0.9727    0.9492      16.6
-table1 staged                    0.9961    0.8711     65.25    0.4688    0.9492     213.7
-table1 feedergan-improved        0.9609    0.9141     55.38         1  0.007812     463.9
-table1 uniform random tree            0         0      7111
+table1 real vs real                          0.9805    0.9688    0.6057    0.9727    0.9492      16.6
+table1 staged                                0.9961    0.8711     65.25    0.4688    0.9492     213.7
+table1 feedergan-improved                    0.9609    0.9141     55.38         1  0.007812     463.9
+table1 uniform random tree                        0         0      7111
+table1 staged + phase repair                 0.9961    0.8711     65.25    0.4727    0.9492     215.8
+table1 feedergan-improved + phase repair     0.9609    0.9141     55.38  0.003906      0.25      1332
 table3 real vs real              0.9805    0.9688    0.6057    0.9727    0.9492      16.6
 table3 GAN + MDN (staged)        0.9961    0.8711     65.25    0.4219    0.9453     199.1
 table3 GAN + i.i.d. echo         0.9961    0.8711     65.25    0.7617   0.03906     206.7
@@ -10,10 +12,12 @@ table3 random tree + MDN              0         0      7111    0.3203    0.5117 
 table3 random tree + echo             0         0      7111    0.2812   0.01172     234.3
 table3 feedergan-improved        0.9609    0.9141     55.38         1  0.007812     463.9
 --- GIN seed 1 ---
-table1 real vs real              0.9688    0.9727     1.466    0.9648    0.9297     23.96
-table1 staged                    0.9922    0.8555     162.3    0.4883    0.8984     194.1
-table1 feedergan-improved        0.9258    0.9297     136.9    0.9609  0.007812     307.6
-table1 uniform random tree            0         0 1.776e+04
+table1 real vs real                          0.9688    0.9727     1.466    0.9648    0.9297     23.96
+table1 staged                                0.9922    0.8555     162.3    0.4883    0.8984     194.1
+table1 feedergan-improved                    0.9258    0.9297     136.9    0.9609  0.007812     307.6
+table1 uniform random tree                        0         0 1.776e+04
+table1 staged + phase repair                 0.9922    0.8555     162.3    0.4805    0.8984     194.6
+table1 feedergan-improved + phase repair     0.9258    0.9297     136.9   0.03906   0.09375      1484
 table3 real vs real              0.9688    0.9727     1.466    0.9648    0.9297     23.96
 table3 GAN + MDN (staged)        0.9922    0.8555     162.3    0.4961     0.918     188.8
 table3 GAN + i.i.d. echo         0.9922    0.8555     162.3    0.6055   0.04297     186.9
@@ -21,10 +25,12 @@ table3 random tree + MDN              0         0 1.776e+04    0.7578    0.7969 
 table3 random tree + echo             0         0 1.776e+04    0.6133   0.04688     181.6
 table3 feedergan-improved        0.9258    0.9297     136.9    0.9609  0.007812     307.6
 --- GIN seed 2 ---
-table1 real vs real              0.9766    0.9766     1.225    0.9609    0.9688     15.21
-table1 staged                    0.9961    0.8359     133.6    0.4688    0.9531     129.3
-table1 feedergan-improved        0.9531    0.9492     120.7    0.9922  0.007812     320.1
-table1 uniform random tree            0         0 1.779e+04
+table1 real vs real                          0.9766    0.9766     1.225    0.9609    0.9688     15.21
+table1 staged                                0.9961    0.8359     133.6    0.4688    0.9531     129.3
+table1 feedergan-improved                    0.9531    0.9492     120.7    0.9922  0.007812     320.1
+table1 uniform random tree                        0         0 1.779e+04
+table1 staged + phase repair                 0.9961    0.8359     133.6    0.4609    0.9531     130.2
+table1 feedergan-improved + phase repair     0.9531    0.9492     120.7  0.003906    0.1289     918.9
 table3 real vs real              0.9766    0.9766     1.225    0.9609    0.9688     15.21
 table3 GAN + MDN (staged)        0.9961    0.8359     133.6    0.4375    0.9727     127.6
 table3 GAN + i.i.d. echo         0.9961    0.8359     133.6    0.9102   0.02344     183.7
@@ -32,10 +38,12 @@ table3 random tree + MDN              0         0 1.779e+04    0.5547    0.7773 
 table3 random tree + echo             0         0 1.779e+04    0.5078  0.007812     195.7
 table3 feedergan-improved        0.9531    0.9492     120.7    0.9922  0.007812     320.1
 --- GIN seed 3 ---
-table1 real vs real              0.9766    0.9766     2.367    0.9766     0.957     27.82
-table1 staged                    0.9961    0.8594     260.3    0.4609    0.9492     209.4
-table1 feedergan-improved        0.9531    0.9688     223.8    0.9844  0.007812     503.9
-table1 uniform random tree            0         0 2.741e+04
+table1 real vs real                          0.9766    0.9766     2.367    0.9766     0.957     27.82
+table1 staged                                0.9961    0.8594     260.3    0.4609    0.9492     209.4
+table1 feedergan-improved                    0.9531    0.9688     223.8    0.9844  0.007812     503.9
+table1 uniform random tree                        0         0 2.741e+04
+table1 staged + phase repair                 0.9961    0.8594     260.3    0.4609    0.9492     210.9
+table1 feedergan-improved + phase repair     0.9531    0.9688     223.8   0.01562    0.4648      1970
 table3 real vs real              0.9766    0.9766     2.367    0.9766     0.957     27.82
 table3 GAN + MDN (staged)        0.9961    0.8594     260.3    0.4727    0.9609     191.4
 table3 GAN + i.i.d. echo         0.9961    0.8594     260.3    0.4453   0.02734       282
@@ -43,10 +51,12 @@ table3 random tree + MDN              0         0 2.741e+04    0.6719    0.7852 
 table3 random tree + echo             0         0 2.741e+04    0.4531   0.01953     272.9
 table3 feedergan-improved        0.9531    0.9688     223.8    0.9844  0.007812     503.9
 --- GIN seed 4 ---
-table1 real vs real              0.9805    0.9805     2.502    0.9805    0.9414     13.39
-table1 staged                    0.9922    0.8438     276.5    0.4766    0.9492     208.8
-table1 feedergan-improved        0.9062    0.9492     239.8    0.9844  0.007812       265
-table1 uniform random tree            0         0  3.42e+04
+table1 real vs real                          0.9805    0.9805     2.502    0.9805    0.9414     13.39
+table1 staged                                0.9922    0.8438     276.5    0.4766    0.9492     208.8
+table1 feedergan-improved                    0.9062    0.9492     239.8    0.9844  0.007812       265
+table1 uniform random tree                        0         0  3.42e+04
+table1 staged + phase repair                 0.9922    0.8438     276.5    0.4688    0.9492     209.7
+table1 feedergan-improved + phase repair     0.9062    0.9492     239.8    0.7852    0.3672      1122
 table3 real vs real              0.9805    0.9805     2.502    0.9805    0.9414     13.39
 table3 GAN + MDN (staged)        0.9922    0.8438     276.5    0.4805    0.9414     205.4
 table3 GAN + i.i.d. echo         0.9922    0.8438     276.5    0.4961  0.003906       216
@@ -57,16 +67,18 @@ table3 feedergan-improved        0.9062    0.9492     239.8    0.9844  0.007812 
 === mean +- std over GIN seeds [0, 1, 2, 3, 4] ===
 
 table1
-  real vs real          prdc 0.977+-0.0048  prdc 0.975+-0.0045  FD 1.63+-0.8  prdc(attr) 0.971+-0.0081  prdc(attr) 0.949+-0.015  FD(attr) 19.4+-6.2
-  staged                prdc 0.995+-0.0021  prdc 0.853+-0.014  FD 180+-89  prdc(attr) 0.473+-0.01  prdc(attr) 0.94+-0.023  FD(attr) 191+-35
-  feedergan-improved    prdc 0.94+-0.023  prdc 0.942+-0.021  FD 155+-76  prdc(attr) 0.984+-0.015  prdc(attr) 0.00781+-0  FD(attr) 372+-1.1e+02
-  uniform random tree   prdc 0+-0  prdc 0+-0  FD 2.09e+04+-1e+04
+  real vs real          prdc 0.977+-0.0048  prdc 0.975+-0.0045  FD 1.63+-0.8  prdc(attr) 0.971+-0.0081  prdc(attr) 0.949+-0.015  FD(attr) 19.4+-6.2  FD 10+-8.9e-16  FD 10+-0  FD 10+-0
+  staged                prdc 0.995+-0.0021  prdc 0.853+-0.014  FD 180+-89  prdc(attr) 0.473+-0.01  prdc(attr) 0.94+-0.023  FD(attr) 191+-35  FD 9.41+-0.1  FD 6.55+-0.099  FD 7.98+-0.069
+  feedergan-improved    prdc 0.94+-0.023  prdc 0.942+-0.021  FD 155+-76  prdc(attr) 0.984+-0.015  prdc(attr) 0.00781+-0  FD(attr) 372+-1.1e+02  FD 9.64+-0.15  FD 0.161+-0.0013  FD 4.9+-0.075
+  uniform random tree   prdc 0+-0  prdc 0+-0  FD 2.09e+04+-1e+04  FD 0+-0
+  staged + phase repair prdc 0.995+-0.0021  prdc 0.853+-0.014  FD 180+-89  prdc(attr) 0.469+-0.0083  prdc(attr) 0.94+-0.023  FD(attr) 192+-36  FD 9.41+-0.1  FD 6.51+-0.083  FD 7.96+-0.078
+  feedergan-improved + phase repairprdc 0.94+-0.023  prdc 0.942+-0.021  FD 155+-76  prdc(attr) 0.17+-0.34  prdc(attr) 0.261+-0.16  FD(attr) 1.37e+03+-4e+02  FD 9.64+-0.15  FD 1.25+-2.2  FD 5.45+-1.1
 
 table3
-  real vs real          prdc 0.977+-0.0048  prdc 0.975+-0.0045  FD 1.63+-0.8  prdc(attr) 0.971+-0.0081  prdc(attr) 0.949+-0.015  FD(attr) 19.4+-6.2
-  GAN + MDN (staged)    prdc 0.995+-0.0021  prdc 0.853+-0.014  FD 180+-89  prdc(attr) 0.462+-0.031  prdc(attr) 0.948+-0.021  FD(attr) 182+-31
-  GAN + i.i.d. echo     prdc 0.995+-0.0021  prdc 0.853+-0.014  FD 180+-89  prdc(attr) 0.644+-0.19  prdc(attr) 0.0273+-0.015  FD(attr) 215+-40
-  random tree + MDN     prdc 0+-0  prdc 0+-0  FD 2.09e+04+-1e+04  prdc(attr) 0.566+-0.17  prdc(attr) 0.722+-0.12  FD(attr) 240+-1.4e+02
-  random tree + echo    prdc 0+-0  prdc 0+-0  FD 2.09e+04+-1e+04  prdc(attr) 0.441+-0.13  prdc(attr) 0.018+-0.017  FD(attr) 219+-36
-  feedergan-improved    prdc 0.94+-0.023  prdc 0.942+-0.021  FD 155+-76  prdc(attr) 0.984+-0.015  prdc(attr) 0.00781+-0  FD(attr) 372+-1.1e+02
+  real vs real          prdc 0.977+-0.0048  prdc 0.975+-0.0045  FD 1.63+-0.8  prdc(attr) 0.971+-0.0081  prdc(attr) 0.949+-0.015  FD(attr) 19.4+-6.2  FD 10+-8.9e-16  FD 10+-0  FD 10+-0
+  GAN + MDN (staged)    prdc 0.995+-0.0021  prdc 0.853+-0.014  FD 180+-89  prdc(attr) 0.462+-0.031  prdc(attr) 0.948+-0.021  FD(attr) 182+-31  FD 9.41+-0.1  FD 6.46+-0.29  FD 7.94+-0.15
+  GAN + i.i.d. echo     prdc 0.995+-0.0021  prdc 0.853+-0.014  FD 180+-89  prdc(attr) 0.644+-0.19  prdc(attr) 0.0273+-0.015  FD(attr) 215+-40  FD 9.41+-0.1  FD 0.542+-0.3  FD 4.98+-0.2
+  random tree + MDN     prdc 0+-0  prdc 0+-0  FD 2.09e+04+-1e+04  prdc(attr) 0.566+-0.17  prdc(attr) 0.722+-0.12  FD(attr) 240+-1.4e+02  FD 0+-0  FD 6.58+-1.6  FD 3.29+-0.78
+  random tree + echo    prdc 0+-0  prdc 0+-0  FD 2.09e+04+-1e+04  prdc(attr) 0.441+-0.13  prdc(attr) 0.018+-0.017  FD(attr) 219+-36  FD 0+-0  FD 0.356+-0.33  FD 0.178+-0.17
+  feedergan-improved    prdc 0.94+-0.023  prdc 0.942+-0.021  FD 155+-76  prdc(attr) 0.984+-0.015  prdc(attr) 0.00781+-0  FD(attr) 372+-1.1e+02  FD 9.64+-0.15  FD 0.161+-0.0013  FD 4.9+-0.075
 written to ../custom-approach/results/2026-10-14_heldout_results

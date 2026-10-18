@@ -1,0 +1,11 @@
+=== electrical ===
+set                                   phase edges  phase feeders  taper edges  taper feeders
+real (reference)                           1.0000         1.0000       0.9595         0.0898
+staged, real topology                      0.9983         0.8281       0.9583         0.0352
+staged (full)                              0.9989         0.8672       0.9602         0.0234
+feedergan-improved                         0.6528         0.0000       0.7369         0.0000
+staged + phase repair                      1.0000         1.0000       0.9602         0.0234
+feedergan-improved + phase repair          1.0000         1.0000       0.7369         0.0000
+staged (full): 37 violating edges, 0 of them below the root
+feedergan-improved: 11288 violating edges, 394 of them below the root
+written to ../custom-approach/results/2026-10-14_heldout_results
