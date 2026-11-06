@@ -3,13 +3,13 @@ Example feeders and the stage-localisation figure, in the IEEE style.
 
     python examples/plot_paper_figures.py --device cuda --out <results>/figures
 
-    example_feeders        real, staged and improved FeederGAN feeders side by side,
+    example_feeders        real, staged and modified FeederGAN feeders side by side,
                            segments coloured by phase count (full text width);
                            one row, and a two-row variant
     fidelity_diversity     Table I as a figure: precision against recall for
                            structure and for structure with attributes
     baseline_localisation  Table III as a figure: trained and untrained components
-                           at each stage, plus the improved FeederGAN
+                           at each stage, plus the modified FeederGAN
     Both use the mean and standard deviation over the GIN seeds of
     gin_seed_sweep.py (one column each).
 
@@ -42,8 +42,9 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # ── feeder drawing (custom-approach postprocessing/phase_visualization.py) ───
 PHASE_COUNT = np.array([1, 1, 1, 2, 2, 2, 3])          # a b c ab bc ac abc
-STYLE = {3: ("#2C3E50", 0.8, 1.5), 2: ("#E67E22", 0.65, 1.2), 1: ("#16A085", 0.4, 0.9)}
-LABEL = {3: "Three-phase segment", 2: "Two-phase segment", 1: "Single-phase segment"}
+# line width and marker size sized for one-column panels (about 1.1 in wide)
+STYLE = {3: ("#2C3E50", 0.7, 1.1), 2: ("#E67E22", 0.55, 0.9), 1: ("#16A085", 0.35, 0.6)}
+LABEL = {3: "Three-phase", 2: "Two-phase", 1: "Single-phase"}
 SUBSTATION = "#C0392B"
 VIOLATION = "#8E44AD"                                   # segment breaking the phase rule
 _ANGLES = [0.0, np.pi / 2, -np.pi / 2, np.pi / 4, 3 * np.pi / 4,
@@ -84,47 +85,50 @@ def draw_feeder(ax, feeder):
         if node:
             colour, _, size = STYLE[int(counts[node])]
             ax.plot(x, y, "o", color=colour, markersize=size, markeredgewidth=0, zorder=2)
-    ax.plot(0, 0, "s", color=SUBSTATION, markersize=3.5, zorder=3)
+    ax.plot(0, 0, "s", color=SUBSTATION, markersize=2.8, zorder=3)
     bad = np.flatnonzero(~PhaseSubset().check(feeder)) + 1     # check() starts at node 1
     for node in bad:
-        ax.plot(*pos[int(node)], "x", color=VIOLATION, markersize=2.6,
-                markeredgewidth=0.6, zorder=4)
+        ax.plot(*pos[int(node)], "x", color=VIOLATION, markersize=2.2,
+                markeredgewidth=0.5, zorder=4)
     ax.set_aspect("equal", adjustable="datalim")
     ax.axis("off")
     broken = int(bad.size)
-    root = {3: "three-phase", 2: "two-phase", 1: "single-phase"}[int(counts[0])]
+    root = {3: "Three-phase", 2: "Two-phase", 1: "Single-phase"}[int(counts[0])]
     return broken, root
 
 
 def legend_handles():
-    handles = [Line2D([], [], color=STYLE[c][0], linewidth=STYLE[c][1] + 0.4, marker="o",
-                      markersize=STYLE[c][2] + 1, markeredgewidth=0, label=LABEL[c])
+    handles = [Line2D([], [], color=STYLE[c][0], linewidth=STYLE[c][1] + 0.5, marker="o",
+                      markersize=STYLE[c][2] + 1.2, markeredgewidth=0, label=LABEL[c])
                for c in (3, 2, 1)]
     handles.append(Line2D([], [], color=SUBSTATION, marker="s", linestyle="none",
-                          markersize=3.5, label="Substation"))
+                          markersize=3.0, label="Substation"))
     handles.append(Line2D([], [], color=VIOLATION, marker="x", linestyle="none",
-                          markersize=3.5, markeredgewidth=0.8,
-                          label="Segment breaking the phase rule"))
+                          markersize=3.0, markeredgewidth=0.7, label="Phase-rule violation"))
     return handles
 
 
 def example_feeders(sets, out_dir, rows):
-    names = [("real (floor)", "Real feeder"), ("staged", "Staged model"),
-             ("feedergan-improved", "Improved FeederGAN")]
-    height = 0.6 + 2.3 * rows
-    fig, axes = paper_style.subplots(rows, 3, height, width_in=paper_style.TEXT_WIDTH_IN,
+    """One IEEE column (3.5 in) so that the 8 pt text prints at 8 pt.
+
+    Titles: model, substation phases, and how many segments break the phase rule.
+    """
+    names = [("real (floor)", "Reference feeder"), ("staged", "Staged"),
+             ("feedergan-improved", "Modified FeederGAN")]
+    height = 0.55 + 1.75 * rows
+    fig, axes = paper_style.subplots(rows, 3, height, width_in=paper_style.COLUMN_WIDTH_IN,
                                      squeeze=False)
+    fig.get_layout_engine().set(w_pad=0.01, wspace=0.02)
     for r in range(rows):
         for c, (key, title) in enumerate(names):
             ax = axes[r, c]
             feeder = sets[key][r]
             broken, root = draw_feeder(ax, feeder)
-            rule = ("Phase rule holds on every segment" if broken == 0
-                    else f"{broken} of {feeder.num_nodes - 1} segments break the phase rule")
+            rule = "Valid" if broken == 0 else f"{broken} violations"
             heading = f"{title}\n" if r == 0 else ""
-            ax.set_title(f"{heading}{root.capitalize()} substation\n{rule}", fontsize=8)
+            ax.set_title(f"{heading}{root} root\n{rule}", fontsize=8, pad=2, linespacing=1.1)
     fig.legend(handles=legend_handles(), loc="outside lower center", ncol=3, frameon=False,
-               handletextpad=0.4, columnspacing=1.5, labelspacing=0.3)
+               handlelength=1.4, handletextpad=0.3, columnspacing=0.8, labelspacing=0.2)
     paper_style.save(fig, out_dir, "example_feeders" if rows == 1 else "example_feeders_2rows")
     plt.close(fig)
 
@@ -167,9 +171,9 @@ def _pr_panels(rows, points, out_dir, name, height, legend_cols):
 def fidelity_diversity(seeds, out_dir):
     """Table I as a figure: the two models and the real reference."""
     points = [
-        ("real vs real", "Real feeders", dict(marker="o", color="0.45")),
+        ("real vs real", "Reference feeders", dict(marker="o", color="0.45")),
         ("staged", "Staged model", dict(marker="s", color="#1f5fa8")),
-        ("feedergan-improved", "Improved FeederGAN", dict(marker="^", color="#d1731d")),
+        ("feedergan-improved", "Modified FeederGAN", dict(marker="^", color="#d1731d")),
     ]
     _pr_panels(seeds["table1"], points, out_dir, "fidelity_diversity", 1.95, 3)
 
@@ -179,7 +183,7 @@ def baseline_localisation(seeds, out_dir):
     attribute swap moves recall in the attributed panel."""
     # marker shape = topology source, fill = attribute source
     points = [
-        ("real vs real", "Real feeders", dict(marker="o", color="0.45")),
+        ("real vs real", "Reference feeders", dict(marker="o", color="0.45")),
         ("GAN + MDN (staged)", "Topology GAN and attribute model (staged)",
          dict(marker="s", color="#1f5fa8")),
         ("GAN + i.i.d. echo", "Topology GAN and independent attributes",
@@ -188,7 +192,7 @@ def baseline_localisation(seeds, out_dir):
          dict(marker="v", color="#1f5fa8")),
         ("random tree + echo", "Random tree and independent attributes",
          dict(marker="v", facecolors="none", edgecolors="#1f5fa8")),
-        ("feedergan-improved", "Improved FeederGAN (joint)", dict(marker="^", color="#d1731d")),
+        ("feedergan-improved", "Modified FeederGAN (joint)", dict(marker="^", color="#d1731d")),
     ]
     _pr_panels(seeds["table3"], points, out_dir, "baseline_localisation", 2.9, 1)
 

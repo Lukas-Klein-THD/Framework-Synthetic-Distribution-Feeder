@@ -31,9 +31,9 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 #: Display name and colour per scored set; the floor stands in for real data.
 STYLE = {
-    "real (floor)": ("Real feeders", "0.45", "o"),
+    "real (floor)": ("Reference feeders", "0.45", "o"),
     "staged": ("Staged model", "#1f5fa8", "s"),
-    "feedergan-improved": ("Improved FeederGAN", "#d1731d", "^"),
+    "feedergan-improved": ("Modified FeederGAN", "#d1731d", "^"),
 }
 
 

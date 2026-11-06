@@ -60,7 +60,7 @@ REP = "\\quad + phase repair"
 GEN = [("Staged", "staged", "staged (full)", "staged", "staged"),
        (REP, "staged + phase repair", "staged + phase repair", "staged + phase repair",
         "staged + phase repair"),
-       ("Improved FeederGAN", "feedergan-improved", "feedergan-improved",
+       ("Modified FeederGAN", "feedergan-improved", "feedergan-improved",
         "feedergan-improved", "feedergan-improved"),
        (REP, "feedergan-improved + phase repair", "feedergan-improved + phase repair",
         "feedergan-improved + phase repair", "feedergan-improved + phase repair")]
@@ -186,7 +186,7 @@ metrics3 = [lambda f: f["energised"], lambda f: f["ansi_a"],
 cols3 = []
 for j, get in enumerate(metrics3):
     col = [pct(get(flow(arm))) for _, _, _, arm, _ in GEN]
-    # the raw improved FeederGAN's V, W, U are measured on its energised part
+    # the raw modified FeederGAN's V, W, U are measured on its energised part
     if j > 0:
         col = [c + "$^{\\dagger}$" if k == "feedergan-improved" else c
                for c, k in zip(col, keys1)]
@@ -250,7 +250,7 @@ the training feeders for the attribute model. Each stage is diagnosed by its own
 metric family: the topology swap moves the structural metrics, the attribute swap
 moves the attributed recall. Precision (P), recall (R) and Fr\\'echet distance
 (FD); $n = {n3}$ held-out feeders; mean $\\pm$ standard deviation over five
-embedding initialisations. The improved FeederGAN generates jointly and cannot be
+embedding initialisations. The modified FeederGAN generates jointly and cannot be
 decomposed; it is shown for reference.}}
 \\label{{tab:localisation}}
 \\setlength{{\\tabcolsep}}{{4pt}}
@@ -267,7 +267,7 @@ Topology & Attributes & P $\\uparrow$ & R $\\uparrow$ & FD $\\downarrow$
 \\midrule
 {body3}
 \\midrule
-\\multicolumn{{2}}{{@{{}}l}}{{Improved FeederGAN (joint)}}
+\\multicolumn{{2}}{{@{{}}l}}{{Modified FeederGAN (joint)}}
   & {" & ".join(cells(t3["feedergan-improved"], SK))}
   & {" & ".join(cells(t3["feedergan-improved"], AK))} \\\\
 \\bottomrule
