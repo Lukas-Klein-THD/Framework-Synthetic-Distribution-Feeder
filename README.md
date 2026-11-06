@@ -18,10 +18,30 @@ separates the three concerns:
 Two reference models with opposite designs, a staged pipeline and a joint
 generator, are included and evaluated end to end.
 
+### Setup
+
+Work in a virtual environment named `venv` in the repository root (it is
+gitignored, and editors such as VS Code pick it up automatically). Python 3.10
+or newer.
+
 ```bash
-pip install -e .            # core (NumPy only)
-pip install torch networkx matplotlib dss-python   # plugins, evaluation, figures
+python -m venv venv
+source venv/bin/activate                # Windows (PowerShell): venv\Scripts\Activate.ps1
+python -m pip install -e ".[plugins,dev]"
+python -m pytest                        # all tests should pass
 ```
+
+* **What gets installed.** `-e` installs `gridgen` and `plugins` in editable
+  mode, so code changes take effect without reinstalling. The extras:
+  * `plugins`: torch, networkx, matplotlib and dss-python, which the bundled
+    models, the evaluation and the figure scripts need;
+  * `dev`: pytest.
+
+  `pip install -e .` alone installs only the NumPy-based core.
+* **GPU training.** PyPI's default torch build on Windows is CPU-only. For
+  `--device cuda`, install the CUDA build that matches your driver first, using
+  the command from [pytorch.org](https://pytorch.org/get-started/locally/), then
+  run the `pip install -e` line above.
 
 ---
 

@@ -13,10 +13,17 @@ dependencies = ["numpy>=1.23"]
 [project.optional-dependencies]
 # Plugins bring their own modelling stack; the core deliberately does not.
 torch = ["torch>=2.0"]
+# everything the bundled plugins, evaluation and figure scripts import
+plugins = ["torch>=2.0", "networkx>=3.0", "matplotlib>=3.7", "dss-python>=0.15"]
 dev = ["pytest>=7.0"]
 
 [tool.setuptools.packages.find]
-include = ["gridgen*", "adapters*"]
+include = ["gridgen*", "plugins*"]
+
+[tool.setuptools.package-data]
+"plugins.distribution" = ["splits/*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# import gridgen and plugins from the repository root, also with plain `pytest`
+pythonpath = ["."]
