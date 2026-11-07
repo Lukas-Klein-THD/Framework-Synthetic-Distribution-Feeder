@@ -18,6 +18,7 @@ outputs/
 # (anchored to the repo root so the gridgen/data package is not excluded)
 /data/
 /tensors/
+/scratch/
 
 # editors / OS
 .vscode/
