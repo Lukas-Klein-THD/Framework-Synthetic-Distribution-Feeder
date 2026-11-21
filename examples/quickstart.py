@@ -22,8 +22,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from gridgen import Pipeline, catalogue                                # noqa: E402
 from plugins.distribution import (                                     # noqa: E402
-    AmpacityTapering, PhaseSubset, SourcePathLabeler, TensorFeederSource,
-    structural_metrics)
+    AmpacityTapering, PhaseSubset, SourcePathLabeler, TensorFeederSource)
+from plugins.graph_metrics import structural_metrics                  # noqa: E402
 from plugins.staged import build_staged, config                        # noqa: E402
 from plugins.staged.training import train_attributes, train_topology   # noqa: E402
 

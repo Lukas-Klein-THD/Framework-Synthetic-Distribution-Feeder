@@ -164,7 +164,8 @@ nothing.
 ## Evaluation scorecard
 
 The distribution plugin (`plugins/distribution`) defines the evaluation used for
-every model. It has three dimensions, each with its own score on a 0–10 scale
+every model, built on the generic graph metrics in `plugins/graph_metrics`. It
+has three dimensions, each with its own score on a 0–10 scale
 (`plugins/distribution/metrics.py`, `examples/summary_scores.py`).
 
 ### 1. Statistical realism
@@ -358,12 +359,18 @@ gridgen/                     the framework: interfaces only, NumPy only
   evaluation/   Descriptor, Distance, Metric, Evaluator, Scorecard
   pipeline.py   end-to-end run
 
+plugins/graph_metrics/       generic graph metrics, no domain knowledge
+  descriptors.py degree histogram, Laplacian spectrum, random-GIN embedding
+  distances.py  MMD, Frechet distance (FD), precision/recall/density/coverage
+  suites.py     structural_metrics, attributed_metrics
+  graphs.py     undirected view, radial-tree check
+
 plugins/distribution/        shared domain plugin
   config.py     data location, graph size, split file, power-flow operating point
   data.py       DataSource over preprocessed tensors, held-out split, labeller
   splits/       the shipped held-out split
   constraints.py phase subset (hard, with repair) and ampacity tapering (soft)
-  metrics.py    random-GIN embedding, distances, scores
+  metrics.py    attribute encoder and the three scorecard scores
   powerflow.py  OpenDSS snapshot solve as a metric
   derived.py    attributes computed from a finished feeder
   reconstruction.py  soft adjacency -> graph (Algorithm 2), BFS relabelling
