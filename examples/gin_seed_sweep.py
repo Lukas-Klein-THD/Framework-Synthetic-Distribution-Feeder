@@ -28,7 +28,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from gridgen.core.feeder import Feeder                                     # noqa: E402
-from plugins.distribution import attributed_metrics, structural_metrics    # noqa: E402
+from plugins.graph_metrics import attributed_metrics, structural_metrics   # noqa: E402
 from plugins.distribution.metrics import realism_score                    # noqa: E402
 from plugins.distribution import config as shared                          # noqa: E402
 from full_results import (                                                 # noqa: E402

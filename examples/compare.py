@@ -29,11 +29,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from gridgen import Evaluator                                              # noqa: E402
 from gridgen.evaluation.base import Direction                              # noqa: E402
 from plugins.distribution import (                                         # noqa: E402
-    AmpacityTapering, AttributeEncoder, PhaseSubset, TensorFeederSource,
-    attributed_metrics, structural_metrics)
+    AmpacityTapering, AttributeEncoder, PhaseSubset, TensorFeederSource)
 from plugins.distribution import config as shared                          # noqa: E402
-from plugins.distribution.metrics import (                                 # noqa: E402
-    is_radial_tree)
+from plugins.graph_metrics import (                                        # noqa: E402
+    attributed_metrics, is_radial_tree, structural_metrics)
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_LINECODES = os.path.join(REPO, "..", "paper-implementation", "data", "dss_data",

@@ -46,8 +46,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from gridgen import Evaluator                                              # noqa: E402
 from gridgen.core.feeder import Feeder                                     # noqa: E402
 from plugins.distribution import (                                         # noqa: E402
-    AmpacityTapering, AttributeEncoder, PhaseSubset, TensorFeederSource,
-    attributed_metrics, structural_metrics)
+    AmpacityTapering, AttributeEncoder, PhaseSubset, TensorFeederSource)
+from plugins.graph_metrics import attributed_metrics, structural_metrics   # noqa: E402
 from plugins.distribution import config as shared                          # noqa: E402
 from plugins.distribution.data import SourcePathLabeler                    # noqa: E402
 from compare import tree_shape                                             # noqa: E402

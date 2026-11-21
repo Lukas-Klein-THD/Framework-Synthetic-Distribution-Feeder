@@ -76,7 +76,9 @@ attribute quality on *real* topologies and separate the two stages' errors.
 ## 3. Adding a metric
 
 Most graph metrics factor into a descriptor and a distance, so add whichever half
-is new:
+is new. Generic ones (they only read the graph, or per-node vectors from an
+encoder) belong in `plugins/graph_metrics/`; anything that needs domain
+knowledge belongs in the domain plugin (`plugins/distribution/`):
 
 ```python
 class MyDescriptor(Descriptor):

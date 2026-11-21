@@ -14,7 +14,7 @@ import torch
 
 from gridgen import Feeder, FeederGenerator, available
 from plugins import feedergan_improved  # noqa: F401  (registration)
-from plugins.distribution.metrics import is_radial_tree
+from plugins.graph_metrics import is_radial_tree
 from plugins.feedergan_improved import FeederGANImproved
 from plugins.feedergan_improved.encoding import AMPACITIES, CAT_VOCAB_SIZES, decode, encode
 from plugins.distribution.reconstruction import algorithm2, to_rooted_order
