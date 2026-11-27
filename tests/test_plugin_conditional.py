@@ -1,8 +1,9 @@
 """
 Tests for the conditional ampacity-phase plugin.
 
-The encoding is checked on small hand-built trees, so most tests run without the
-dataset; the ones that need it are skipped when it is unavailable.
+The encoding and the back-off table are checked on small hand-built inputs, so
+most tests run without the dataset; the ones that need it are skipped when it is
+unavailable.
 """
 
 from __future__ import annotations
@@ -11,9 +12,15 @@ import numpy as np
 import pytest
 
 from gridgen import Feeder
-from plugins.conditional.config import ContextConfig
+from plugins.conditional.config import ContextConfig, TableConfig
 from plugins.conditional.encoding import (N_PHASES, ContextEncoder, OutcomeVocabulary,
                                           TreeStructure)
+from gridgen import AttributeGenerator
+from plugins.conditional.generator import ConditionalAttributes, walk
+from plugins.conditional.models.base import ConditionalModel
+from plugins.distribution.data import schema
+from plugins.conditional.models.table import (BackoffTable, backoff_probs, count_table,
+                                              lookup_counts, marginal)
 
 
 def tree_feeder(parents, ampacity, phase) -> Feeder:
@@ -159,13 +166,228 @@ def test_config_switches_fields():
     assert enc.radix["parent"] == voc.n_ampacity * N_PHASES + 1
 
 
+# ── table: counting and back-off ─────────────────────────────────────────────
+def test_count_table_counts_repeated_pairs():
+    ids, counts = count_table(np.array([7, 3, 7, 7, 3]), np.array([1, 0, 1, 2, 0]), 3)
+    assert ids.tolist() == [3, 7]
+    assert counts.tolist() == [[2, 0, 0], [0, 2, 1]]
+
+
+def test_lookup_gives_zeros_for_unseen_contexts():
+    ids, counts = count_table(np.array([7, 3, 7, 7, 3]), np.array([1, 0, 1, 2, 0]), 3)
+    rows = lookup_counts(ids, counts, np.array([7, 5, 3, 9]))
+    assert rows.tolist() == [[0, 2, 1], [0, 0, 0], [2, 0, 0], [0, 0, 0]]
+
+
+def test_marginal_is_smoothed_and_never_zero():
+    np.testing.assert_allclose(marginal(np.array([0] * 6 + [1] * 3 + [2]), 3),
+                               np.array([6.5, 3.5, 1.5]) / 11.5)
+    assert np.all(marginal(np.array([0, 0, 2]), 4) > 0)        # outcomes 1 and 3 never occur
+
+
+def test_backoff_stops_at_the_finest_seen_level():
+    outcomes = np.array([0, 0, 0, 0, 0, 1, 1, 1, 1, 2])
+    level1 = np.array([0, 0, 0, 0, 0, 1, 1, 1, 1, 1])
+    level2 = np.array([0, 0, 0, 0, 0, 10, 10, 10, 11, 11])
+    tables = [count_table(level1, outcomes, 3), count_table(level2, outcomes, 3)]
+    probs = backoff_probs(marginal(outcomes, 3), tables,
+                          [np.array([1, 1, 5]), np.array([11, 99, 99])], beta=5.0)
+    np.testing.assert_allclose(probs, [[0.171, 0.568, 0.261],     # seen at both levels
+                                       [0.239, 0.596, 0.165],     # seen at level 1 only
+                                       [0.478, 0.391, 0.130]],    # seen at neither: marginal
+                               atol=1e-3)
+
+
+# ── table: the model ─────────────────────────────────────────────────────────
+def _fitted_table(factorised=False, beta=5.0):
+    f = small_tree()
+    enc = ContextEncoder(OutcomeVocabulary().fit([f]))
+    fields, targets = enc.encode_feeders([f], np.random.default_rng(0))
+    model = BackoffTable(enc, TableConfig(beta=beta, factorised=factorised)).fit(fields, targets)
+    return model, fields, targets
+
+
+def test_table_implements_the_model_contract():
+    model, _, _ = _fitted_table()
+    assert isinstance(model, ConditionalModel)
+    assert model.name == "table"
+    assert list(model.tables) == ["outcome"]
+    assert list(_fitted_table(factorised=True)[0].tables) == ["ampacity_class", "phase"]
+
+
+def test_unseen_context_backs_off_to_the_marginal():
+    model, fields, _ = _fitted_table()
+    table = model.tables["outcome"]
+    # a parent (160 A, ABC) that no node of the small tree has: every level is unseen
+    unseen = dict(fields, parent=np.full_like(fields["parent"],
+                                              model.vocabulary.value_code([160.0], [6.0])[0]))
+    for f in (fields, unseen):
+        np.testing.assert_allclose(table.probs(model.encoder, f).sum(1), 1.0)
+    np.testing.assert_allclose(table.probs(model.encoder, unseen),
+                               np.tile(table.marginal_probs, (len(unseen["parent"]), 1)))
+
+
+def test_tiny_beta_reproduces_the_counts():
+    model, fields, targets = _fitted_table(beta=1e-9)
+    context = model.encoder.index(fields)                     # the finest level
+    probs = model.tables["outcome"].probs(model.encoder, fields)
+    for row in range(len(context)):
+        same = targets["outcome"][context == context[row]]
+        freq = np.bincount(same, minlength=model.vocabulary.n_outcomes) / len(same)
+        np.testing.assert_allclose(probs[row], freq, atol=1e-6)
+
+
+def test_sampling_matches_the_probabilities_and_is_reproducible():
+    model, fields, _ = _fitted_table()
+    one = {name: np.repeat(values[1:2], 20000) for name, values in fields.items()}
+    codes = model.sample(one, np.random.default_rng(1))
+    assert np.isin(codes, model.vocabulary.pairs).all()       # joint: only real pairs
+    freq = np.bincount(model.vocabulary.outcome_of_code(codes),
+                       minlength=model.vocabulary.n_outcomes) / len(codes)
+    probs = model.tables["outcome"].probs(model.encoder, one)[0]
+    assert np.abs(freq - probs).max() < 0.02
+    np.testing.assert_array_equal(model.sample(one, np.random.default_rng(7)),
+                                  model.sample(one, np.random.default_rng(7)))
+    assert model.sample({k: v[:0] for k, v in fields.items()},
+                        np.random.default_rng(0)).dtype.kind == "i"     # empty input: int codes
+
+
+def test_joint_and_factorised_handle_unseen_pairs():
+    joint, fields, targets = _fitted_table()
+    unseen = dict(targets, outcome=targets["outcome"].copy())
+    unseen["outcome"][0] = -1
+    with pytest.raises(ValueError):
+        joint.log_prob(fields, unseen)
+
+    fact, _, _ = _fitted_table(factorised=True)
+    assert np.isfinite(fact.log_prob(fields, unseen)).all()  # scores A and P separately
+    many = {name: np.repeat(values, 2000) for name, values in fields.items()}
+    codes = fact.sample(many, np.random.default_rng(0))
+    assert np.all((codes >= 0) & (codes < fact.vocabulary.n_value_codes))
+    assert np.any(fact.vocabulary.outcome_of_code(codes) == -1)   # draws unseen pairs
+
+
+def test_unfitted_table_raises():
+    model, fields, targets = _fitted_table()
+    empty = BackoffTable(model.encoder)
+    for call in (lambda: empty.log_prob(fields, targets),
+                 lambda: empty.sample(fields, np.random.default_rng(0)),
+                 empty.state):
+        with pytest.raises(RuntimeError):
+            call()
+
+
+@pytest.mark.parametrize("factorised", [False, True])
+def test_table_survives_a_checkpoint(tmp_path, factorised):
+    """Saved with torch and loaded in its safe mode, the model is unchanged."""
+    torch = pytest.importorskip("torch")
+    model, fields, targets = _fitted_table(factorised=factorised)
+    path = tmp_path / "table.pt"
+    torch.save(model.state(), path)
+    loaded = BackoffTable.from_state(torch.load(path, weights_only=True))
+    assert loaded.config == model.config
+    assert loaded.encoder.config == model.encoder.config
+    np.testing.assert_array_equal(loaded.bits(fields, targets), model.bits(fields, targets))
+    np.testing.assert_array_equal(loaded.sample(fields, np.random.default_rng(0)),
+                                  model.sample(fields, np.random.default_rng(0)))
+
+
+# ── generator ────────────────────────────────────────────────────────────────
+class CopyParent:
+    """Fake model: the root gets code 5, every other node its parent's code.
+
+    If the walk generates every node after its parent, every node ends up 5.
+    """
+
+    def __init__(self, encoder):
+        self.root = encoder.root
+        self.rows = 0
+
+    def sample(self, fields, rng):
+        self.rows += len(fields["parent"])
+        parent = fields["parent"]
+        return np.where(parent == self.root, 5, parent)
+
+
+class TorchLengths(AttributeGenerator):
+    """Fake length source that samples with torch, like the staged MDN."""
+
+    @property
+    def schema(self):
+        return schema()
+
+    def generate(self, adjacencies, *, category=None, rng=None):
+        import torch
+        return [{"length": torch.rand(len(a)).numpy()} for a in adjacencies]
+
+
+def random_tree(m=128, seed=0):
+    """A random rooted tree in BFS order (every parent before its children)."""
+    rng = np.random.default_rng(seed)
+    parents = [-1] + [int(rng.integers(0, j)) for j in range(1, m)]
+    return tree_feeder(parents, [400] * m, [6] * m).adjacency
+
+
+def test_walk_generates_every_node_after_its_parent():
+    f = small_tree()
+    enc = ContextEncoder(OutcomeVocabulary().fit([f]))
+    m = 128
+    trees = [f.adjacency, f.adjacency]
+    big = [tree_feeder([-1] + list(range(m - 1)), [400] * m, [6] * m).adjacency,   # chain
+           tree_feeder([-1] + [0] * (m - 1), [400] * m, [6] * m).adjacency,        # star
+           random_tree(m)]
+    for batch in (trees, big):
+        model = CopyParent(enc)
+        codes = walk(enc, model, batch, np.random.default_rng(0))
+        assert np.all(codes == 5)                       # complete and top down
+        assert model.rows == codes.size                 # every node exactly once
+
+
+def test_conditional_attributes_produce_schema_conforming_feeders():
+    model, _, _ = _fitted_table()
+    gen = ConditionalAttributes(model, lengths=TorchLengths(), batch_size=3)
+    assert isinstance(gen, AttributeGenerator)
+    trees = [random_tree(seed=s) for s in range(7)]   # 7 trees in batches of 3, 3, 1
+    out = gen.generate(trees, rng=np.random.default_rng(0))
+    assert len(out) == len(trees)
+    for adjacency, attributes in zip(trees, out):
+        assert set(attributes) == {"length", "ampacity", "phase"}
+        assert all(v.dtype == np.float32 for v in attributes.values())
+        assert Feeder(adjacency, attributes).validate(gen.schema) == []
+        assert np.isin(attributes["ampacity"], model.vocabulary.ampacity_classes).all()
+
+
+def test_conditional_attributes_are_reproducible():
+    model, _, _ = _fitted_table()
+    gen = ConditionalAttributes(model, lengths=TorchLengths())
+    trees = [random_tree(seed=s) for s in range(3)]
+    a = gen.generate(trees, rng=np.random.default_rng(0))
+    b = gen.generate(trees, rng=np.random.default_rng(0))
+    c = gen.generate(trees, rng=np.random.default_rng(1))
+    for x, y in zip(a, b):                              # same seed: identical, lengths too
+        for key in x:
+            np.testing.assert_array_equal(x[key], y[key])
+    assert any(not np.array_equal(x["length"], z["length"]) for x, z in zip(a, c))
+
+
+def test_conditional_attributes_reject_a_category():
+    model, _, _ = _fitted_table()
+    gen = ConditionalAttributes(model, lengths=TorchLengths())
+    with pytest.raises(ValueError):
+        gen.generate([random_tree()], category="rural")
+
+
 # ── data (skipped without the dataset) ───────────────────────────────────────
-def _train():
+def _split(name):
     from plugins.distribution.data import TensorFeederSource
     try:
-        return list(TensorFeederSource(split="train"))
+        return list(TensorFeederSource(split=name))
     except (FileNotFoundError, RuntimeError) as exc:
         pytest.skip(f"dataset unavailable: {exc}")
+
+
+def _train():
+    return _split("train")
 
 
 def test_training_vocabulary_matches_the_analysis():
@@ -173,3 +395,56 @@ def test_training_vocabulary_matches_the_analysis():
     voc = OutcomeVocabulary().fit(_train())
     assert voc.n_ampacity == 17
     assert voc.n_outcomes == 28
+
+
+#: held-out bits per node on the test split, beta = 5 (analysis/edge_conditions.ipynb and
+#: custom-approach results/2026-11-27_wp1_classical_baseline)
+LADDER = {
+    "T1 factorised, parent": (dict(use_subtree=False, use_sibling_subtree=False,
+                                   use_previous_sibling=False), True, 1.745),
+    "T2 joint, parent": (dict(use_subtree=False, use_sibling_subtree=False,
+                              use_previous_sibling=False), False, 1.264),
+    "T3 + subtree": (dict(use_sibling_subtree=False, use_previous_sibling=False), False, 1.152),
+    "T4 + sibling subtree": (dict(use_previous_sibling=False), False, 1.052),
+    "T5 + previous sibling": (dict(), False, 1.024),
+}
+
+
+def test_table_ladder_matches_the_analysis():
+    train, test = _split("train"), _split("test")
+    voc = OutcomeVocabulary().fit(train)
+    for name, (context, factorised, expected) in LADDER.items():
+        enc = ContextEncoder(voc, ContextConfig(**context))
+        fields, targets = enc.encode_feeders(train, np.random.default_rng(0))
+        test_fields, test_targets = enc.encode_feeders(test, np.random.default_rng(0))
+        model = BackoffTable(enc, TableConfig(factorised=factorised)).fit(fields, targets)
+        bits = model.bits(test_fields, test_targets).mean()
+        assert bits == pytest.approx(expected, abs=1e-3), name
+
+
+def test_t5_table_on_real_topologies_matches_the_prototype():
+    """T5 with staged-MDN lengths on the comparison topologies (custom-approach WP1 run).
+
+    Real feeders: 54 % single-phase segments; the prototype's T5: 53.5 %, and
+    99.9 % of feeders phase-valid without any constraint.
+    """
+    import os
+    from plugins.distribution import config as shared
+    from plugins.distribution.constraints import PhaseSubset
+    from plugins.distribution.data import TensorFeederSource
+    from plugins.staged.attributes import MDNAttributes
+    checkpoint = os.path.join(shared.CHECKPOINT_ROOT, "heldout", "staged", "attributes.pt")
+    if not os.path.exists(checkpoint):
+        pytest.skip(f"staged checkpoint unavailable: {checkpoint}")
+    train = _split("train")
+    topologies = [np.asarray(f.adjacency)
+                  for f in TensorFeederSource(split="comparison").sample(256, seed=0)]
+    voc = OutcomeVocabulary().fit(train)
+    enc = ContextEncoder(voc)
+    model = BackoffTable(enc).fit(*enc.encode_feeders(train, np.random.default_rng(0)))
+    gen = ConditionalAttributes(model, lengths=MDNAttributes(checkpoint=checkpoint))
+    feeders = [Feeder(a, x) for a, x in
+               zip(topologies, gen.generate(topologies, rng=np.random.default_rng(0)))]
+    single = np.mean([np.isin(f.attributes["phase"][1:], [0, 1, 2]).mean() for f in feeders])
+    assert single == pytest.approx(0.54, abs=0.03)
+    assert PhaseSubset().validate(feeders).feeder_rate >= 0.99

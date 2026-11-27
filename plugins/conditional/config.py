@@ -44,3 +44,12 @@ class ContextConfig:
     @property
     def n_subtree_bins(self) -> int:
         return len(self.subtree_edges) + 1
+
+
+@dataclass(frozen=True)
+class TableConfig:
+    """Hierarchical back-off table."""
+    #: Dirichlet strength towards the next coarser context (held-out bits stable for 1-20)
+    beta: float = 5.0
+    #: p(A | ctx) p(P | ctx) instead of p(Y | ctx): the factorised control (T1)
+    factorised: bool = False
