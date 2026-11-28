@@ -17,6 +17,7 @@ Three choices keep one interface for joint and factorised models alike:
               A QCBM on hardware yields samples, not probabilities.
 """
 
+from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
@@ -26,37 +27,46 @@ from plugins.conditional.encoding import ContextEncoder, OutcomeVocabulary
 
 
 class ConditionalModel(ABC):
-    """P(ampacity, phase | context) for one node."""
+    """P(ampacity, phase | context) for one node.
 
+    The model owns its context encoder (and through it the vocabulary), so
+    training, generation and evaluation always encode the same way, and a
+    checkpoint carries both.
+    """
+
+    #: key in ``state()["model"]``, used by :func:`plugins.conditional.models.load_model`
     name: str = ""
 
-    # every model has one context encoder, which is shared by training, generation, and evaluation.
     def __init__(self, encoder: ContextEncoder):
         self.encoder = encoder
 
-    # The vocabulary is shared by training, generation, and evaluation., but it is fitted on the training split and stored with the checkpoint.
     @property
     def vocabulary(self) -> OutcomeVocabulary:
+        """The (ampacity, phase) vocabulary, fitted on the training split."""
         return self.encoder.vocabulary
-    
-    @abstractmethod
-    def fit(self, fields: dict[str, np.ndarray], targets: dict[str, np.ndarray]) -> "ConditionalModel":
-        ...
 
     @abstractmethod
-    def log_prob(self, fields, targets) -> np.ndarray: ...
+    def fit(self, fields: dict[str, np.ndarray],
+            targets: dict[str, np.ndarray]) -> "ConditionalModel":
+        """Fit on encoded training rows; returns ``self``."""
 
     @abstractmethod
-    def sample(self, fields, rng: np.random.Generator) -> np.ndarray: ...
+    def log_prob(self, fields, targets) -> np.ndarray:
+        """Natural-log probability of each row's target, [n_rows]."""
 
     @abstractmethod
-    def state(self) -> dict: ...
+    def sample(self, fields, rng: np.random.Generator) -> np.ndarray:
+        """One draw per row, as value codes [n_rows]."""
+
+    @abstractmethod
+    def state(self) -> dict:
+        """Everything needed to rebuild the model, in plain Python types."""
 
     @classmethod
     @abstractmethod
-    def from_state(cls, state: dict) -> "ConditionalModel": ...
+    def from_state(cls, state: dict) -> "ConditionalModel":
+        """Rebuild a fitted model from :meth:`state`."""
 
-    # helper
     def bits(self, fields, targets) -> np.ndarray:
-        """Return the number of bits required to encode each target given its context."""
+        """Bits needed to encode each row's target given its context, [n_rows]."""
         return -self.log_prob(fields, targets) / np.log(2)

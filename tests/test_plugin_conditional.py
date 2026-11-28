@@ -11,16 +11,17 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from gridgen import Feeder
+from gridgen import AttributeGenerator, Feeder
 from plugins.conditional.config import LADDER, ContextConfig, TableConfig
 from plugins.conditional.encoding import (N_PHASES, ContextEncoder, OutcomeVocabulary,
                                           TreeStructure)
-from gridgen import AttributeGenerator
 from plugins.conditional.generator import ConditionalAttributes, walk
+from plugins.conditional.models import load_model
 from plugins.conditional.models.base import ConditionalModel
-from plugins.distribution.data import schema
 from plugins.conditional.models.table import (BackoffTable, backoff_probs, count_table,
                                               lookup_counts, marginal)
+from plugins.conditional.training import fit_table
+from plugins.distribution.data import schema
 
 
 def tree_feeder(parents, ampacity, phase) -> Feeder:
@@ -292,6 +293,35 @@ def test_table_survives_a_checkpoint(tmp_path, factorised):
                                   model.sample(fields, np.random.default_rng(0)))
 
 
+# ── training and loading ─────────────────────────────────────────────────────
+@pytest.mark.parametrize("rung", ["t1", "t5"])
+def test_fit_table_writes_a_checkpoint_that_load_model_rebuilds(tmp_path, rung):
+    """The checkpoint alone is enough: the loaded encoder scores like the fitted model."""
+    context, table = LADDER[rung]
+    model, path = fit_table([small_tree()], context, table, out_dir=str(tmp_path / "out"),
+                            name=rung)
+    assert path == str(tmp_path / "out" / f"{rung}.pt")          # out_dir is created
+    loaded = load_model(path)
+    assert isinstance(loaded, BackoffTable)
+    assert loaded.encoder.config == context and loaded.config == table
+    fields, targets = loaded.encoder.encode_feeders([small_tree()], np.random.default_rng(0))
+    np.testing.assert_array_equal(loaded.bits(fields, targets), model.bits(fields, targets))
+
+
+def test_fit_table_is_deterministic_for_a_seed(tmp_path):
+    a, _ = fit_table([small_tree()], out_dir=str(tmp_path), name="a", seed=3)
+    b, _ = fit_table([small_tree()], out_dir=str(tmp_path), name="b", seed=3)
+    assert a.state() == b.state()
+
+
+def test_load_model_rejects_an_unknown_model(tmp_path):
+    torch = pytest.importorskip("torch")
+    path = tmp_path / "unknown.pt"
+    torch.save({"model": "not-a-model"}, path)
+    with pytest.raises(ValueError, match="unknown model"):
+        load_model(str(path))
+
+
 # ── generator ────────────────────────────────────────────────────────────────
 class CopyParent:
     """Fake model: the root gets code 5, every other node its parent's code.
@@ -377,6 +407,13 @@ def test_conditional_attributes_reject_a_category():
         gen.generate([random_tree()], category="rural")
 
 
+def test_importing_the_plugin_registers_its_components():
+    import plugins.conditional                          # noqa: F401  (registers)
+    from gridgen.core.registry import available
+    assert "conditional" in available("attribute_generator")
+    assert "staged-conditional" in available("generator")
+
+
 # ── data (skipped without the dataset) ───────────────────────────────────────
 def _split(name):
     from plugins.distribution.data import TensorFeederSource
@@ -397,16 +434,22 @@ def test_training_vocabulary_matches_the_analysis():
     assert voc.n_outcomes == 28
 
 
+#: held-out bits per node on the test split, beta = 5 (analysis/edge_conditions.ipynb and
+#: custom-approach results/2026-11-27_wp1_classical_baseline)
+EXPECTED_BITS = {"t1": 1.745, "t2": 1.264, "t3": 1.152, "t4": 1.052, "t5": 1.024}
+
+
 def test_table_ladder_matches_the_analysis():
+    """The presets in config.LADDER reproduce the prototype's held-out bits."""
     train, test = _split("train"), _split("test")
     voc = OutcomeVocabulary().fit(train)
-    for name, (context, factorised, expected) in LADDER.items():
-        enc = ContextEncoder(voc, ContextConfig(**context))
+    for rung, (context, table) in LADDER.items():
+        enc = ContextEncoder(voc, context)
         fields, targets = enc.encode_feeders(train, np.random.default_rng(0))
         test_fields, test_targets = enc.encode_feeders(test, np.random.default_rng(0))
-        model = BackoffTable(enc, TableConfig(factorised=factorised)).fit(fields, targets)
+        model = BackoffTable(enc, table).fit(fields, targets)
         bits = model.bits(test_fields, test_targets).mean()
-        assert bits == pytest.approx(expected, abs=1e-3), name
+        assert bits == pytest.approx(EXPECTED_BITS[rung], abs=1e-3), rung
 
 
 def test_t5_table_on_real_topologies_matches_the_prototype():

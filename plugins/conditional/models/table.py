@@ -1,9 +1,30 @@
 """
 Hierarchical back-off tables: P(ampacity, phase | context) by counting.
 
-TODO module docstring: what the model is, why it backs off along the field order
-(coarsest = parent alone), what ``factorised`` isolates, same family as the
-analysis notebook.
+The table counts how often each outcome follows each context in the training
+data.  A rich context is rare, so its counts alone are noisy, and an unseen
+context has none.  The table therefore backs off along the context fields in
+their configured order (parent, subtree, out-degree, sibling subtree, previous
+sibling):
+
+    level 0   the marginal over all training nodes (add-0.5, so never 0)
+    level 1   the parent's value alone
+    level k   the first k active fields
+
+and at every level mixes the counts of the context with the estimate one level
+coarser:
+
+    p_k = (counts_k + beta * p_(k-1)) / (n_k + beta)
+
+A context seen often is almost its own counts; a rare one leans on the coarser
+estimate, and an unseen one (n_k = 0) keeps it unchanged.  This is a
+hierarchical Dirichlet estimate, the family of the analysis notebook
+(``custom-approach/analysis/edge_conditions.ipynb``), and it reproduces the
+notebook's held-out bits.
+
+``TableConfig.factorised`` replaces the joint table p(Y | ctx) over the observed
+(ampacity, phase) pairs by p(A | ctx) p(P | ctx), with the same context and
+smoothing: the control that isolates what drawing the pair jointly is worth.
 """
 
 from __future__ import annotations
@@ -16,56 +37,56 @@ from plugins.conditional.config import ContextConfig, TableConfig
 from plugins.conditional.encoding import N_PHASES, ContextEncoder, OutcomeVocabulary
 from plugins.conditional.models.base import ConditionalModel
 
-def _draw(p: np.ndarray, rng: np.random.Generator) -> np.ndarray:
-    """One class per row of 'p' [N, n_out], by inverse CDF"""
-    c = p.cumsum(1)
-    u = rng.random(len(p))[:, None] * c[:, -1:]
-    return np.minimum((u > c).sum(1), p.shape[1] - 1)
 
-def count_table(context: np.ndarray, y: np.ndarray, n_out: int):
+def _draw(probs: np.ndarray, rng: np.random.Generator) -> np.ndarray:
+    """One class per row of ``probs`` [n_rows, n_outcomes], by inverse CDF."""
+    cumulative = probs.cumsum(1)
+    u = rng.random(len(probs))[:, None] * cumulative[:, -1:]
+    return np.minimum((u > cumulative).sum(1), probs.shape[1] - 1)
+
+
+def count_table(context_ids: np.ndarray, outcomes: np.ndarray, n_outcomes: int):
     """Count outcomes per context.
 
-    context  [N] integer context id per row
-    y        [N] outcome per row, in 0..n_out-1
-    returns  (ids, counts): ids [C] the sorted distinct contexts,
-             counts [C, n_out] how often each outcome occurred in each
+    context_ids  [n_rows] integer context id per row
+    outcomes     [n_rows] outcome per row, in 0..n_outcomes-1
+    returns      (table_ids, table_counts): table_ids [C] the sorted distinct
+                 contexts, table_counts [C, n_outcomes] how often each outcome
+                 occurred in each
     """
-    ids, row_positions = np.unique(context, return_inverse=True)
+    table_ids, row_positions = np.unique(context_ids, return_inverse=True)
+    table_counts = np.zeros((len(table_ids), n_outcomes))
+    np.add.at(table_counts, (row_positions.ravel(), outcomes), 1)
+    return table_ids, table_counts
 
-    counts = np.zeros((len(ids), n_out))
-    np.add.at(counts, (row_positions.ravel(), y), 1)
 
-    return ids, counts
+def lookup_counts(table_ids: np.ndarray, table_counts: np.ndarray,
+                  query_ids: np.ndarray) -> np.ndarray:
+    """The counts of the contexts ``query_ids`` [n_rows]; zeros where a context is unseen.
 
-def lookup_counts(ids: np.ndarray, counts: np.ndarray, context: np.ndarray) -> np.ndarray:
-    """Count rows for the contexts ``context`` [N]; zeros where a context is unseen.
-
-    ids, counts  a table from count_table
-    returns      [N, n_out]
+    table_ids, table_counts  a table from count_table
+    returns                  [n_rows, n_outcomes]
     """
-    # 1. build a dict: id -> row number in counts
-    id_to_row = {id_: row for row, id_ in enumerate(ids)}
-
-    # 2. make an output of zeros, shape [len(context), counts.shape[1]]
-    out = np.zeros((len(context), counts.shape[1]))
-
-    # 3. for each position k and id c in context:
-    #        if c is in the dict: copy that row of counts into output row k
-    for position, context_id in enumerate(context):
-        if context_id in id_to_row:
-            row = id_to_row[context_id]
-            out[position] = counts[row]
-    # 4. return the output
+    id_to_row = {table_id: row for row, table_id in enumerate(table_ids)}
+    out = np.zeros((len(query_ids), table_counts.shape[1]))
+    for position, query_id in enumerate(query_ids):
+        if query_id in id_to_row:
+            out[position] = table_counts[id_to_row[query_id]]
     return out
+
 
 def marginal(outcomes: np.ndarray, n_outcomes: int) -> np.ndarray:
     """How common each outcome is over all training nodes, [n_outcomes]; never 0.
-    Formula: (count of each outcome + 0.5) / (number of nodes + 0.5 · n_outcomes)"""
+
+    Formula: (count of each outcome + 0.5) / (number of nodes + 0.5 · n_outcomes)
+    """
     counts = np.bincount(outcomes, minlength=n_outcomes)
     return (counts + 0.5) / (len(outcomes) + 0.5 * n_outcomes)
-    
+
+
 def smooth(context_counts: np.ndarray, coarser_probs: np.ndarray, beta: float) -> np.ndarray:
     """Mix the counts of a context with the estimate from the coarser level.
+
     Formula: (context_counts + beta · coarser_probs) / (total count of the context + beta)
 
     context_counts  [n_rows, n_outcomes]  counts from lookup_counts
@@ -75,6 +96,7 @@ def smooth(context_counts: np.ndarray, coarser_probs: np.ndarray, beta: float) -
     """
     total_counts = context_counts.sum(1, keepdims=True)
     return (context_counts + beta * coarser_probs) / (total_counts + beta)
+
 
 def backoff_probs(marginal_probs: np.ndarray, level_tables: list, level_query_ids: list,
                   beta: float) -> np.ndarray:
@@ -103,25 +125,15 @@ class _Backoff:
         self.level_tables = []         # set by fit: one (table_ids, table_counts) per level
 
     def fit(self, encoder, fields, outcomes) -> "_Backoff":
-        # 1. marginal of the outcomes
+        """The marginal, then one count table per back-off level."""
         self.marginal_probs = marginal(outcomes, self.n_outcomes)
-        # 2. for each names in encoder.levels():
-        #        context_ids = encoder.index(fields, names)
-        #        append count_table(context_ids, outcomes, self.n_outcomes)
-        self.level_tables = []
-        for names in encoder.levels():
-            context_ids = encoder.index(fields, names)
-            table = count_table(context_ids, outcomes, self.n_outcomes)
-            self.level_tables.append(table)
-        # 3. return self
+        self.level_tables = [count_table(encoder.index(fields, names), outcomes, self.n_outcomes)
+                             for names in encoder.levels()]
         return self
 
     def probs(self, encoder, fields) -> np.ndarray:
-        # 1. for each names in encoder.levels(): query ids = encoder.index(fields, names)
-        level_query_ids = []
-        for names in encoder.levels():
-            level_query_ids.append(encoder.index(fields, names))
-        # 2. return backoff_probs(self.marginal_probs, self.level_tables, those ids, self.beta)
+        """[n_rows, n_outcomes] probabilities, smoothed from the marginal to the finest level."""
+        level_query_ids = [encoder.index(fields, names) for names in encoder.levels()]
         return backoff_probs(self.marginal_probs, self.level_tables, level_query_ids, self.beta)
 
     def state(self) -> dict:

@@ -31,8 +31,11 @@ The three dimensions, as in ``summary_scores.py``:
                   one draw; the seeds here give the score a spread)
     overall       the mean of the three
 
-These describe attribute quality on real topology; the paper's full-pipeline
-rows also include generated topology, so the numbers are not interchangeable.
+These describe attribute quality on real topology.  A second section repeats
+the scorecard for the full pipeline: the paper's ``staged (full)`` set against
+the registered ``staged-conditional`` generator on exactly the same generated
+topologies, so only the attribute stage differs.  There, realism is the
+paper's mean of structural and attributed realism.
 Spreads: ``sd sampling`` over sampling seeds (each value first averaged over the
 GIN seeds), ``sd GIN`` over GIN seeds (averaged over sampling seeds).
 """
@@ -46,6 +49,7 @@ import os
 import sys
 
 import numpy as np
+import torch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -53,14 +57,20 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from full_results import (AMP_KEYS, REPO, Context, _Tee, evaluate,            # noqa: E402
                           generate_attributes, persistence, tv, validity, values,
                           with_attributes)
+from gridgen.core.registry import build                                       # noqa: E402
 from plugins.conditional import config                                        # noqa: E402
 from plugins.conditional.generator import ConditionalAttributes               # noqa: E402
 from plugins.conditional.models import load_model                             # noqa: E402
+from plugins.distribution import config as shared                             # noqa: E402
 from plugins.distribution.metrics import (operational_score, physical_score,  # noqa: E402
                                           realism_score)
-from plugins.graph_metrics import attributed_metrics                          # noqa: E402
+from plugins.graph_metrics import attributed_metrics, structural_metrics      # noqa: E402
 
 REAL, CEILING, STAGED = "real (comparison)", "real A, P + MDN lengths", "staged MDN"
+STAGED_FULL = "staged (full)"
+#: (precision key, recall key) of the two realism families, as in gin_seed_sweep.py
+FAMILIES = {"structure": ("gin.prdc.precision", "gin.prdc.recall"),
+            "attributes": ("gin-attributed.prdc.precision", "gin-attributed.prdc.recall")}
 #: metrics that depend on the GIN initialisation
 GIN_KEYS = ("precision", "recall", "coverage", "density", "fd")
 
@@ -198,6 +208,101 @@ def flow_summary(per_seed_flow: list[dict]) -> dict:
     return out
 
 
+# ── full pipeline: generated topology ────────────────────────────────────────
+def family_scores(ctx, gin_seeds, feeders) -> dict:
+    """Structural and attributed precision / recall per GIN seed."""
+    out = {}
+    for e in gin_seeds:
+        metrics = structural_metrics(seed=e) + attributed_metrics(ctx.encoder, seed=e)
+        s = evaluate(metrics, ctx.reference, feeders, ctx.seed, "")
+        out[e] = {key: float(s[key]) for keys in FAMILIES.values() for key in keys}
+    return out
+
+
+def realism_of(scores: dict, real: dict) -> dict:
+    """Per GIN seed: each family's 0-10 score against real, and their mean."""
+    out = {}
+    for e, row in scores.items():
+        family = {name: realism_score(row[p], row[r], real[e][p], real[e][r])
+                  for name, (p, r) in FAMILIES.items()}
+        out[e] = {**family, "realism": float(np.mean(list(family.values())))}
+    return out
+
+
+def full_pipeline(ctx, args, real_flow) -> dict:
+    """The staged topology with the MDN's attributes or with a rung's, on paired topologies.
+
+    ``staged (full)`` is the paper's set (one draw, ``full_results.Context.samples``).
+    The rung rows use the registered ``staged-conditional`` generator with the same
+    torch seed, so they get exactly the same topologies; only their attributes are
+    drawn per sampling seed.
+    """
+    staged_dir = os.path.join(shared.CHECKPOINT_ROOT, "staged")
+    paper = ctx.samples("staged")
+    real = family_scores(ctx, args.gin_seeds, ctx.floor)
+    sets = {STAGED_FULL: [paper]}
+    for rung in args.rungs:
+        generator = build("generator", "staged-conditional",
+                          topology_checkpoint=os.path.join(staged_dir, "topology.pt"),
+                          checkpoint=os.path.join(args.checkpoints, f"{rung}.pt"),
+                          length_checkpoint=os.path.join(staged_dir, "attributes.pt"),
+                          device=args.device)
+        sets[f"staged topology + {rung}"] = []
+        for g in args.gen_seeds:
+            torch.manual_seed(ctx.seed)                  # the paper's topology draw
+            feeders = generator.sample(len(paper), rng=np.random.default_rng(1000 + g))
+            assert all(np.array_equal(f.adjacency, p.adjacency)
+                       for f, p in zip(feeders, paper)), "topologies must be paired"
+            sets[f"staged topology + {rung}"].append(feeders)
+
+    rows = {}
+    for name, draws in sets.items():
+        per_draw = []
+        for feeders in draws:
+            realism = realism_of(family_scores(ctx, args.gin_seeds, feeders), real)
+            v = validity(feeders)
+            row = {k: over_seeds([[realism[e][k] for e in args.gin_seeds]])
+                   for k in ("structure", "attributes", "realism")}
+            row["physical"] = physical_score(v["phase-subset.edges"], v["phase-subset.feeders"])
+            if not args.no_power_flow:
+                flow = power_flow({name: feeders[:args.pf_n]}, args)
+                row["operational"] = flow[f"{args.pf_kw:g} kW | {name}"]["operational"]
+            per_draw.append(row)
+        rows[name] = per_draw
+        print(f"  {name} scored", flush=True)
+
+    summary = {}
+    for name, per_draw in rows.items():
+        s = {k: {"mean": float(np.mean([r[k]["mean"] for r in per_draw])),
+                 "sd_gin": float(np.mean([r[k]["sd_gin"] for r in per_draw]))}
+             for k in ("structure", "attributes", "realism")}
+        for k in ("physical", "operational"):
+            if k in per_draw[0]:
+                x = [r[k] for r in per_draw]
+                s[k] = {"mean": float(np.mean(x)),
+                        "sd_sampling": float(np.std(x, ddof=1)) if len(x) > 1 else 0.0}
+        x = [r["realism"]["mean"] for r in per_draw]
+        s["realism"]["sd_sampling"] = float(np.std(x, ddof=1)) if len(x) > 1 else 0.0
+        if "operational" in s:
+            s["overall"] = float(np.mean([s["realism"]["mean"], s["physical"]["mean"],
+                                          s["operational"]["mean"]]))
+        summary[name] = s
+
+    # real vs real: 10 on both realism families by construction
+    v = validity(ctx.floor)
+    real_row = {k: {"mean": 10.0, "sd_gin": 0.0, "sd_sampling": 0.0}
+                for k in ("structure", "attributes", "realism")}
+    real_row["physical"] = {"mean": physical_score(v["phase-subset.edges"],
+                                                   v["phase-subset.feeders"]),
+                            "sd_sampling": 0.0}
+    if real_flow:
+        real_row["operational"] = {"mean": real_flow[f"{args.pf_kw:g} kW | {REAL}"]
+                                   ["operational"], "sd_sampling": 0.0}
+        real_row["overall"] = float(np.mean([10.0, real_row["physical"]["mean"],
+                                             real_row["operational"]["mean"]]))
+    return {"summary": {REAL: real_row, **summary}, "per_draw": rows}
+
+
 # ── main ─────────────────────────────────────────────────────────────────────
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__)
@@ -213,6 +318,8 @@ def main() -> None:
     p.add_argument("--checkpoints", default=config.CHECKPOINT_DIR,
                    help="folder with <rung>.pt from examples/train.py --model conditional-table")
     p.add_argument("--no-power-flow", action="store_true", help="skip the operational dimension")
+    p.add_argument("--no-pipeline", action="store_true",
+                   help="skip the full-pipeline rows (generated topology)")
     p.add_argument("--pf-n", type=int, default=64, help="feeders per arm in the power flow")
     p.add_argument("--pf-loads", type=float, nargs="+", default=[10.0, 50.0, 100.0],
                    help="kW per node")
@@ -311,11 +418,33 @@ def main() -> None:
             print(f"\noperational at {args.pf_kw:g} kW per node, first {args.pf_n} feeders of "
                   f"every sampling seed")
 
+        # ── full pipeline: generated topology ────────────────────────────────
+        pipeline = {}
+        if not args.no_pipeline:
+            print("\n=== full pipeline: staged topology, MDN or conditional attributes ===\n")
+            pipeline = full_pipeline(ctx, args, flow_per_seed.get("real", {}))
+            print("\nsummary, 0-10; realism = mean(structure, attributes) as in the paper\n")
+            print(f"{'set':<26}{'structure':>10}{'attributes':>11}{'realism':>9}{'sd GIN':>8}"
+                  f"{'sd samp.':>9}{'physical':>10}"
+                  + (f"{'operational':>13}{'sd samp.':>9}{'overall':>9}" if flow else ""))
+            for name, s in pipeline["summary"].items():
+                line = (f"{name:<26}{s['structure']['mean']:>10.2f}"
+                        f"{s['attributes']['mean']:>11.2f}{s['realism']['mean']:>9.2f}"
+                        f"{s['realism']['sd_gin']:>8.2f}{s['realism']['sd_sampling']:>9.2f}"
+                        f"{s['physical']['mean']:>10.2f}")
+                if flow:
+                    line += (f"{s['operational']['mean']:>13.2f}"
+                             f"{s['operational']['sd_sampling']:>9.2f}{s['overall']:>9.2f}")
+                print(line)
+            print(f"\n{STAGED_FULL}: the paper's set, one draw; the rung rows share its "
+                  f"topologies, attributes over sampling seeds {args.gen_seeds}")
+
     with open(os.path.join(args.out, "ladder.json"), "w") as f:
         json.dump({"n": args.n, "seed": args.seed, "gin_seeds": args.gin_seeds,
                    "sampling_seeds": args.gen_seeds, "checkpoints": args.checkpoints,
                    "summary": summary, "results": results, "power_flow": flow,
-                   "per_seed": per_seed, "power_flow_per_seed": flow_per_seed}, f, indent=2)
+                   "per_seed": per_seed, "power_flow_per_seed": flow_per_seed,
+                   "full_pipeline": pipeline}, f, indent=2)
     print(f"written to {args.out}")
 
 

@@ -2,7 +2,8 @@
 Settings of the conditional ampacity-phase models.
 
 Data location, graph size and evaluation settings are shared by every model and
-live in :mod:`plugins.distribution.config`; this module holds only what is specific to the conditional models.  Each switch in :class:`ContextConfig` adds
+live in :mod:`plugins.distribution.config`; this module holds only what is
+specific to the conditional models.  Each switch in :class:`ContextConfig` adds
 one field to the context, so the models of a comparison differ in exactly one
 setting.
 """
