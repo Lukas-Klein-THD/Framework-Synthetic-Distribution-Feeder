@@ -35,14 +35,7 @@ import numpy as np
 
 from plugins.conditional.config import ContextConfig, TableConfig
 from plugins.conditional.encoding import N_PHASES, ContextEncoder, OutcomeVocabulary
-from plugins.conditional.models.base import ConditionalModel
-
-
-def _draw(probs: np.ndarray, rng: np.random.Generator) -> np.ndarray:
-    """One class per row of ``probs`` [n_rows, n_outcomes], by inverse CDF."""
-    cumulative = probs.cumsum(1)
-    u = rng.random(len(probs))[:, None] * cumulative[:, -1:]
-    return np.minimum((u > cumulative).sum(1), probs.shape[1] - 1)
+from plugins.conditional.models.base import ConditionalModel, draw
 
 
 def count_table(context_ids: np.ndarray, outcomes: np.ndarray, n_outcomes: int):
@@ -203,7 +196,7 @@ class BackoffTable(ConditionalModel):
         self._check_fitted()
         draws = {}
         for name, table in self.tables.items():
-            draws[name] = _draw(table.probs(self.encoder, fields), rng)
+            draws[name] = draw(table.probs(self.encoder, fields), rng)
 
         if self.config.factorised:
             return draws["ampacity_class"] * N_PHASES + draws["phase"]

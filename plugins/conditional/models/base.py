@@ -26,6 +26,17 @@ import numpy as np
 from plugins.conditional.encoding import ContextEncoder, OutcomeVocabulary
 
 
+def draw(probs: np.ndarray, rng: np.random.Generator) -> np.ndarray:
+    """One class per row of ``probs`` [n_rows, n_classes], by inverse CDF.
+
+    Shared by every model, so that one ``rng`` drives sampling the same way
+    whatever estimates the probabilities.
+    """
+    cumulative = probs.cumsum(1)
+    u = rng.random(len(probs))[:, None] * cumulative[:, -1:]
+    return np.minimum((u > cumulative).sum(1), probs.shape[1] - 1)
+
+
 class ConditionalModel(ABC):
     """P(ampacity, phase | context) for one node.
 

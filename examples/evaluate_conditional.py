@@ -314,9 +314,10 @@ def main() -> None:
     p.add_argument("--gen-seeds", type=int, nargs="+", default=[0, 1, 2, 3, 4],
                    help="sampling seeds of the generated attributes")
     p.add_argument("--rungs", nargs="+", default=list(config.LADDER),
-                   choices=list(config.LADDER))
+                   help="checkpoint names in --checkpoints: t1-t5 (tables), mlp_t2-mlp_t5, ...")
     p.add_argument("--checkpoints", default=config.CHECKPOINT_DIR,
-                   help="folder with <rung>.pt from examples/train.py --model conditional-table")
+                   help="folder with <rung>.pt from examples/train.py --model conditional-table "
+                        "or conditional-mlp")
     p.add_argument("--no-power-flow", action="store_true", help="skip the operational dimension")
     p.add_argument("--no-pipeline", action="store_true",
                    help="skip the full-pipeline rows (generated topology)")
@@ -333,6 +334,9 @@ def main() -> None:
     args = p.parse_args()
     if not args.no_power_flow and args.pf_kw not in args.pf_loads:
         p.error("--pf-kw must be one of --pf-loads")
+    missing = [r for r in args.rungs if not os.path.exists(os.path.join(args.checkpoints, f"{r}.pt"))]
+    if missing:
+        p.error(f"no checkpoint for {missing} in {args.checkpoints}")
     os.makedirs(os.path.join(args.out, "logs"), exist_ok=True)
 
     with open(os.path.join(args.out, "logs", "evaluate_conditional.log"), "w",

@@ -4,12 +4,16 @@ Train the reference models on the same data.
     python examples/train.py --model staged --device cuda
     python examples/train.py --model feedergan-improved --device cuda
     python examples/train.py --model conditional-table            # all five ladder rungs
+    python examples/train.py --model conditional-mlp --rung t5    # the network, t5 context
 
 All models read the same source: every feeder and sub-feeder with at least
 M = 128 nodes, truncated to its first 128 BFS nodes.  Checkpoints go to
 ``checkpoints/<model>/``; the comparison uses the final checkpoint of each.
 The conditional tables are fitted by counting, so ``--device`` and
 ``--iterations`` do not apply to them; ``--rung`` picks one ladder rung.
+The conditional MLP trains on the CPU with the context of a rung (t2-t5; t1 is
+the factorised table, which has no network counterpart) and is saved as
+``mlp_<rung>.pt`` next to the tables; ``--iterations`` caps its epochs.
 """
 
 from __future__ import annotations
@@ -27,7 +31,8 @@ from plugins.distribution import TensorFeederSource      # noqa: E402
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model", required=True,
-                        choices=["staged", "feedergan-improved", "conditional-table"])
+                        choices=["staged", "feedergan-improved", "conditional-table",
+                                 "conditional-mlp"])
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--iterations", type=int, default=None,
                         help="override the configured iteration count (for smoke tests)")
@@ -38,7 +43,8 @@ def main() -> None:
     parser.add_argument("--stage", default="all", choices=["all", "topology", "attributes"],
                         help="staged model only: train one stage, keep the other's checkpoint")
     parser.add_argument("--rung", default="all", choices=["t1", "t2", "t3", "t4", "t5", "all"],
-                        help="conditional-table only: one ladder rung, or all five")
+                        help="conditional models only: one ladder rung, or all "
+                             "(the MLP skips t1)")
     args = parser.parse_args()
     start = time.time()
 
@@ -72,6 +78,27 @@ def main() -> None:
             context, table = config.LADDER[rung]
             _, path = fit_table(feeders, context, table, out_dir=out, name=rung)
             print(f"{rung}: {path}")
+    elif args.model == "conditional-mlp":
+        from dataclasses import replace
+        from plugins.conditional import config
+        from plugins.conditional.training import fit_mlp
+
+        if args.rung == "t1":
+            parser.error("t1 is the factorised table; the MLP takes the context of t2-t5")
+        source = TensorFeederSource(split=None if args.split == "all" else args.split)
+        print(source)
+        feeders = list(source)                              # read once, fit every rung
+        out = args.out or config.CHECKPOINT_DIR
+        mlp = config.MLPConfig()
+        if args.iterations:
+            mlp = replace(mlp, max_epochs=args.iterations)
+        rungs = [r for r in config.LADDER if r != "t1"] if args.rung == "all" else [args.rung]
+        for rung in rungs:
+            context, _ = config.LADDER[rung]
+            model, path = fit_mlp(feeders, context, mlp, out_dir=out, name=f"mlp_{rung}")
+            best = min(model.history, key=lambda epoch: epoch["validation"])
+            print(f"{rung}: {path}  (best epoch {best['epoch']} of {len(model.history)}, "
+                  f"validation {best['validation']:.4f} bits)")
     elif args.model == "feedergan-improved":
         from dataclasses import replace
         from plugins.feedergan_improved import config

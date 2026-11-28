@@ -10,12 +10,14 @@ from __future__ import annotations
 import torch
 
 from plugins.conditional.models.base import ConditionalModel
+from plugins.conditional.models.mlp import MLPModel
 from plugins.conditional.models.table import BackoffTable
 
 #: ``ConditionalModel.name`` -> class; a new model adds itself here
-MODELS: dict[str, type[ConditionalModel]] = {BackoffTable.name: BackoffTable}
+MODELS: dict[str, type[ConditionalModel]] = {BackoffTable.name: BackoffTable,
+                                             MLPModel.name: MLPModel}
 
-__all__ = ["ConditionalModel", "BackoffTable", "MODELS", "load_model"]
+__all__ = ["ConditionalModel", "BackoffTable", "MLPModel", "MODELS", "load_model"]
 
 
 def load_model(path: str) -> ConditionalModel:

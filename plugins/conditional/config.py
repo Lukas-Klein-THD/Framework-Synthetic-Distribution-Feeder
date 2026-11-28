@@ -65,3 +65,43 @@ LADDER = {
     "t4": (ContextConfig(use_previous_sibling=False), TableConfig()),
     "t5": (ContextConfig(), TableConfig()),
 }
+
+
+@dataclass(frozen=True)
+class MLPConfig:
+    """
+    Feedforward network for the conditional model.
+
+    Each active context field is looked up in its own embedding; the embeddings are
+    concatenated (n_fields * embedding_dim inputs) and mapped through ``n_layers``
+    hidden layers to one logit per outcome.  Trained by cross-entropy with early
+    stopping on held-back training feeders.
+    """
+    # ── architecture ──
+    #: numbers per field value in each embedding
+    embedding_dim: int = 16
+    #: width of every hidden layer
+    hidden_dim: int = 128
+    #: number of hidden layers (0: the embeddings feed the output layer directly)
+    n_layers: int = 2
+    #: share of hidden units switched off at random during training
+    dropout: float = 0.1
+
+    # ── optimisation ──
+    #: Adam learning rate
+    lr: float = 1e-3
+    #: L2 penalty on the weights
+    weight_decay: float = 0.0
+    #: rows per gradient step
+    batch_size: int = 512
+    #: upper bound on the epochs; early stopping normally ends training sooner
+    max_epochs: int = 100
+
+    # ── early stopping ──
+    #: share of the training feeders held back for early stopping (split by feeder)
+    validation_fraction: float = 0.1
+    #: epochs without a better validation loss before training stops
+    patience: int = 5
+
+    #: weight initialisation, validation split, shuffling and dropout
+    seed: int = 0

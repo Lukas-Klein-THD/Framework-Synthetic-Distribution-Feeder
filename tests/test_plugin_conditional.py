@@ -12,15 +12,16 @@ import numpy as np
 import pytest
 
 from gridgen import AttributeGenerator, Feeder
-from plugins.conditional.config import LADDER, ContextConfig, TableConfig
+from plugins.conditional.config import LADDER, ContextConfig, MLPConfig, TableConfig
 from plugins.conditional.encoding import (N_PHASES, ContextEncoder, OutcomeVocabulary,
                                           TreeStructure)
 from plugins.conditional.generator import ConditionalAttributes, walk
 from plugins.conditional.models import load_model
 from plugins.conditional.models.base import ConditionalModel
+from plugins.conditional.models.mlp import MLPModel, validation_rows
 from plugins.conditional.models.table import (BackoffTable, backoff_probs, count_table,
                                               lookup_counts, marginal)
-from plugins.conditional.training import fit_table
+from plugins.conditional.training import fit_mlp, fit_table
 from plugins.distribution.data import schema
 
 
@@ -320,6 +321,85 @@ def test_load_model_rejects_an_unknown_model(tmp_path):
     torch.save({"model": "not-a-model"}, path)
     with pytest.raises(ValueError, match="unknown model"):
         load_model(str(path))
+
+
+# ── MLP ──────────────────────────────────────────────────────────────────────
+def _encoded_small_tree(context=None):
+    f = small_tree()
+    enc = ContextEncoder(OutcomeVocabulary().fit([f]), context)
+    fields, targets = enc.encode_feeders([f], np.random.default_rng(0))
+    return enc, fields, targets
+
+
+def test_untrained_mlp_scores_and_samples_without_touching_torch_state():
+    """Untrained is a valid, near-uniform model; building it leaves the global torch RNG alone."""
+    import torch
+    enc, fields, targets = _encoded_small_tree()
+    before = torch.random.get_rng_state()
+    cuda_before = torch.cuda.get_rng_state() if torch.cuda.is_available() else None
+    model = MLPModel(enc)
+    assert torch.equal(torch.random.get_rng_state(), before)
+    if cuda_before is not None:                          # manual_seed seeds CUDA too
+        assert torch.equal(torch.cuda.get_rng_state(), cuda_before)
+    bits = model.bits(fields, targets)
+    assert bits.shape == targets["outcome"].shape
+    assert bits.mean() == pytest.approx(np.log2(enc.vocabulary.n_outcomes), abs=0.5)
+    np.testing.assert_array_equal(bits, model.bits(fields, targets))     # dropout off
+    codes = model.sample(fields, np.random.default_rng(0))
+    assert np.isin(codes, enc.vocabulary.pairs).all()
+
+
+def test_mlp_fit_lowers_the_training_bits():
+    enc, fields, targets = _encoded_small_tree()
+    untrained = MLPModel(enc).bits(fields, targets).mean()
+    model = MLPModel(enc, MLPConfig(max_epochs=200, patience=200, batch_size=4))
+    model.fit(fields, targets)
+    assert model.bits(fields, targets).mean() < 0.5 * untrained
+    assert len(model.history) == 200
+
+
+def test_mlp_fit_is_deterministic_for_a_seed():
+    enc, fields, targets = _encoded_small_tree()
+    cfg = MLPConfig(max_epochs=20, batch_size=4, seed=3)
+    a = MLPModel(enc, cfg).fit(fields, targets)
+    b = MLPModel(enc, cfg).fit(fields, targets)
+    np.testing.assert_array_equal(a.bits(fields, targets), b.bits(fields, targets))
+
+
+def test_mlp_survives_a_checkpoint(tmp_path):
+    """Saved with torch and loaded in its safe mode through load_model, the model is unchanged."""
+    import torch
+    enc, fields, targets = _encoded_small_tree(LADDER["t3"][0])
+    model = MLPModel(enc, MLPConfig(max_epochs=5, batch_size=4)).fit(fields, targets)
+    path = tmp_path / "mlp.pt"
+    torch.save(model.state(), path)
+    loaded = load_model(str(path))
+    assert isinstance(loaded, MLPModel)
+    assert loaded.config == model.config and loaded.encoder.config == model.encoder.config
+    assert loaded.history == model.history
+    np.testing.assert_array_equal(loaded.bits(fields, targets), model.bits(fields, targets))
+    np.testing.assert_array_equal(loaded.sample(fields, np.random.default_rng(0)),
+                                  model.sample(fields, np.random.default_rng(0)))
+
+
+def test_fit_mlp_writes_a_checkpoint_that_load_model_rebuilds(tmp_path):
+    context = LADDER["t5"][0]
+    model, path = fit_mlp([small_tree()], context, MLPConfig(max_epochs=5, batch_size=4),
+                          out_dir=str(tmp_path / "out"), name="mlp_t5")
+    assert path == str(tmp_path / "out" / "mlp_t5.pt")
+    loaded = load_model(path)
+    assert isinstance(loaded, MLPModel) and loaded.encoder.config == context
+    fields, targets = loaded.encoder.encode_feeders([small_tree()], np.random.default_rng(0))
+    np.testing.assert_array_equal(loaded.bits(fields, targets), model.bits(fields, targets))
+
+
+def test_validation_rows_hold_back_whole_feeders():
+    feeder = np.repeat(np.arange(10), 5)                 # 10 feeders of 5 rows
+    held_back = validation_rows(feeder, 0.2, np.random.default_rng(0))
+    assert held_back.sum() == 10                         # 2 whole feeders
+    assert all(held_back[feeder == f].all() or not held_back[feeder == f].any()
+               for f in range(10))
+    assert validation_rows(feeder[:5], 0.2, np.random.default_rng(0)) is None   # one feeder
 
 
 # ── generator ────────────────────────────────────────────────────────────────
