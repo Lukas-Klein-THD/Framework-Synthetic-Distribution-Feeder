@@ -12,7 +12,7 @@ import numpy as np
 import pytest
 
 from gridgen import Feeder
-from plugins.conditional.config import ContextConfig, TableConfig
+from plugins.conditional.config import LADDER, ContextConfig, TableConfig
 from plugins.conditional.encoding import (N_PHASES, ContextEncoder, OutcomeVocabulary,
                                           TreeStructure)
 from gridgen import AttributeGenerator
@@ -395,19 +395,6 @@ def test_training_vocabulary_matches_the_analysis():
     voc = OutcomeVocabulary().fit(_train())
     assert voc.n_ampacity == 17
     assert voc.n_outcomes == 28
-
-
-#: held-out bits per node on the test split, beta = 5 (analysis/edge_conditions.ipynb and
-#: custom-approach results/2026-11-27_wp1_classical_baseline)
-LADDER = {
-    "T1 factorised, parent": (dict(use_subtree=False, use_sibling_subtree=False,
-                                   use_previous_sibling=False), True, 1.745),
-    "T2 joint, parent": (dict(use_subtree=False, use_sibling_subtree=False,
-                              use_previous_sibling=False), False, 1.264),
-    "T3 + subtree": (dict(use_sibling_subtree=False, use_previous_sibling=False), False, 1.152),
-    "T4 + sibling subtree": (dict(use_previous_sibling=False), False, 1.052),
-    "T5 + previous sibling": (dict(), False, 1.024),
-}
 
 
 def test_table_ladder_matches_the_analysis():

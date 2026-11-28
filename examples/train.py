@@ -3,10 +3,13 @@ Train the reference models on the same data.
 
     python examples/train.py --model staged --device cuda
     python examples/train.py --model feedergan-improved --device cuda
+    python examples/train.py --model conditional-table            # all five ladder rungs
 
-Both models read the same source: every feeder and sub-feeder with at least
+All models read the same source: every feeder and sub-feeder with at least
 M = 128 nodes, truncated to its first 128 BFS nodes.  Checkpoints go to
 ``checkpoints/<model>/``; the comparison uses the final checkpoint of each.
+The conditional tables are fitted by counting, so ``--device`` and
+``--iterations`` do not apply to them; ``--rung`` picks one ladder rung.
 """
 
 from __future__ import annotations
@@ -23,7 +26,8 @@ from plugins.distribution import TensorFeederSource      # noqa: E402
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--model", required=True, choices=["staged", "feedergan-improved"])
+    parser.add_argument("--model", required=True,
+                        choices=["staged", "feedergan-improved", "conditional-table"])
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--iterations", type=int, default=None,
                         help="override the configured iteration count (for smoke tests)")
@@ -33,6 +37,8 @@ def main() -> None:
                              "or on every graph")
     parser.add_argument("--stage", default="all", choices=["all", "topology", "attributes"],
                         help="staged model only: train one stage, keep the other's checkpoint")
+    parser.add_argument("--rung", default="all", choices=["t1", "t2", "t3", "t4", "t5", "all"],
+                        help="conditional-table only: one ladder rung, or all five")
     args = parser.parse_args()
     start = time.time()
 
@@ -53,7 +59,20 @@ def main() -> None:
         if args.stage in ("all", "attributes"):
             train_attributes(source, attr, device=args.device, out_dir=out, log_every=500)
         print(f"checkpoints: {out}/topology.pt, {out}/attributes.pt")
-    else:
+    elif args.model == "conditional-table":
+        from plugins.conditional import config
+        from plugins.conditional.training import fit_table
+
+        source = TensorFeederSource(split=None if args.split == "all" else args.split)
+        print(source)
+        feeders = list(source)                              # read once, fit every rung
+        out = args.out or config.CHECKPOINT_DIR
+        rungs = list(config.LADDER) if args.rung == "all" else [args.rung]
+        for rung in rungs:
+            context, table = config.LADDER[rung]
+            _, path = fit_table(feeders, context, table, out_dir=out, name=rung)
+            print(f"{rung}: {path}")
+    elif args.model == "feedergan-improved":
         from dataclasses import replace
         from plugins.feedergan_improved import config
         from plugins.feedergan_improved.training import train

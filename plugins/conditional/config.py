@@ -2,8 +2,7 @@
 Settings of the conditional ampacity-phase models.
 
 Data location, graph size and evaluation settings are shared by every model and
-live in :mod:`plugins.distribution.config`; this module holds only what is
-specific to the conditional models.  Each switch in :class:`ContextConfig` adds
+live in :mod:`plugins.distribution.config`; this module holds only what is specific to the conditional models.  Each switch in :class:`ContextConfig` adds
 one field to the context, so the models of a comparison differ in exactly one
 setting.
 """
@@ -53,3 +52,15 @@ class TableConfig:
     beta: float = 5.0
     #: p(A | ctx) p(P | ctx) instead of p(Y | ctx): the factorised control (T1)
     factorised: bool = False
+
+
+#: the WP1 ladder: each rung changes one setting against the one before
+LADDER = {
+    "t1": (ContextConfig(use_subtree=False, use_sibling_subtree=False,
+                         use_previous_sibling=False), TableConfig(factorised=True)),
+    "t2": (ContextConfig(use_subtree=False, use_sibling_subtree=False,
+                         use_previous_sibling=False), TableConfig()),
+    "t3": (ContextConfig(use_sibling_subtree=False, use_previous_sibling=False), TableConfig()),
+    "t4": (ContextConfig(use_previous_sibling=False), TableConfig()),
+    "t5": (ContextConfig(), TableConfig()),
+}
